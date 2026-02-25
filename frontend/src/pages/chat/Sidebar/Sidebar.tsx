@@ -1,22 +1,40 @@
+import { useEffect } from 'react';
 import { useUIStore } from '@/store/uiStore';
+import { useSessionStore } from '@/store/sessionStore';
+import SessionList from './SessionList';
 import styles from './Sidebar.module.css';
 
 export default function Sidebar() {
   const { toggleSidebar } = useUIStore();
+  const { fetchSessions, createSession, loading } = useSessionStore();
+
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
+
+  const handleNewSession = async () => {
+    const session = await createSession();
+    if (session) {
+      // createSession already sets it as active in the store
+    }
+  };
 
   return (
     <div className={styles.sidebar}>
       <div className={styles.header}>
-        <button className={styles.newButton}>
+        <button className={styles.newButton} onClick={handleNewSession}>
           <span>+</span>
           <span>新建对话</span>
         </button>
       </div>
       <div className={styles.sessionList}>
-        {/* Session 列表将在 Phase 2 实现 */}
-        <div className={styles.emptyList}>
-          <p>暂无对话</p>
-        </div>
+        {loading ? (
+          <div className={styles.emptyList}>
+            <p>加载中...</p>
+          </div>
+        ) : (
+          <SessionList />
+        )}
       </div>
       <div className={styles.footer}>
         <button className={styles.collapseButton} onClick={toggleSidebar}>
