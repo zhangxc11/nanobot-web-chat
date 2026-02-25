@@ -25,8 +25,3 @@
   min-width: 0;
   background: var(--bg-primary);
 }
-
-.messages {
-  flex: 1;
-  overflow-y: auto;
-}

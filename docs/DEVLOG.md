@@ -11,8 +11,8 @@
 |------|------|------|
 | Phase 1: 脚手架 & 基础布局 | ✅ 已完成 | merged to develop |
 | Phase 2: 后端 API + Session 管理 | ✅ 已完成 | merged to develop |
-| Phase 3: 交互完善 | 🔄 进行中 | feat/phase3-interaction |
-| Phase 4: Markdown & 代码高亮 | ⏳ 待开始 | |
+| Phase 3: 交互完善 | ✅ 已完成 | merged to develop |
+| Phase 4: Markdown & 代码高亮 | 🔄 进行中 | feat/phase4-markdown |
 | Phase 5: 完善 & 部署 | ⏳ 待开始 | |
 
 ---
@@ -47,22 +47,19 @@
 
 ## Phase 3: 交互完善
 
-- 🔜 **T3.1** "正在思考..." loading 动画
-  - 发送消息后，在消息列表底部显示 typing indicator
-  - 收到回复后移除
-- ⏳ **T3.2** 发送后自动刷新 session 列表排序
-- ⏳ **T3.3** 新建 Session 按钮功能完善
-  - 创建后自动选中，光标聚焦到输入框
-- ⏳ **T3.4** 向上滚动加载更多历史消息（IntersectionObserver）
-- ⏳ **T3.5** Phase 3 集成测试 & merge
+- ✅ **T3.1** "正在思考..." loading 动画（bouncing dots）
+- ✅ **T3.2** 发送后自动刷新 session 列表排序
+- ✅ **T3.3** 新建 Session 后自动选中 + 光标聚焦到输入框
+- ✅ **T3.4** 向上滚动加载更多历史消息（IntersectionObserver）
+- ✅ **T3.5** Phase 3 集成测试 & merge
 
 ---
 
 ## Phase 4: Markdown 渲染 & 代码高亮
 
-- ⏳ **T4.1** MarkdownRenderer 组件（react-markdown + remark-gfm）
+- 🔜 **T4.1** 安装依赖 + MarkdownRenderer 组件（react-markdown + remark-gfm）
 - ⏳ **T4.2** CodeBlock 组件（highlight.js + 复制按钮）
-- ⏳ **T4.3** ToolCallMessage 折叠/展开组件
+- ⏳ **T4.3** 集成到 MessageItem，替换纯文本渲染
 - ⏳ **T4.4** Phase 4 集成测试 & merge
 
 ---
@@ -85,6 +82,13 @@
 - 后端: server_v2.py 完整 REST API（5 个端点）
 - 前端: SessionList, ChatInput, MessageList/Item, ChatPage 集成
 - Vite build 通过，tsc 通过
+
+### 2026-02-25 Phase 3 完成
+- T3.1: Typing indicator（bouncing dots 动画）
+- T3.2: 发送消息后自动刷新 session 列表
+- T3.3: 新建 Session 后自动选中 + 光标聚焦
+- T3.4: IntersectionObserver 无限滚动加载历史消息
+- T3.5: tsc + vite build 通过
 
 ---
 

@@ -13,9 +13,7 @@ export default function ChatPage() {
         <Sidebar />
       </div>
       <div className={styles.chatArea}>
-        <div className={styles.messages}>
-          <MessageList />
-        </div>
+        <MessageList />
         <ChatInput />
       </div>
     </div>

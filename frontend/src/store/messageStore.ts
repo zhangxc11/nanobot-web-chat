@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import type { Message } from '../types';
 import * as api from '../services/api';
+import { useSessionStore } from './sessionStore';
 
 interface MessageStore {
   messages: Message[];
@@ -74,6 +75,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         timestamp: new Date().toISOString(),
       };
       set((s) => ({ messages: [...s.messages, assistantMsg], sending: false }));
+      // Refresh session list to update ordering and summary
+      useSessionStore.getState().fetchSessions();
     } catch (err) {
       set({ sending: false, error: String(err) });
     }
