@@ -566,4 +566,51 @@ main          ← 稳定版本
 
 ---
 
+## 八、自修改安全架构 (v1.1 新增)
+
+### 8.1 问题描述
+
+nanobot 通过 Web Chat UI 接收指令时，可能被要求修改前端代码本身。这产生了一个特殊的架构问题：
+
+```
+用户通过 Web UI 发送 "修改前端代码" 
+  → server_v2.py 调用 nanobot agent
+  → nanobot 修改 .tsx/.css 文件
+  → nanobot 执行 vite build（更新 dist/）
+  → nanobot 可能重启 server_v2.py ← 💥 这里出问题
+  → server_v2.py 被杀 → HTTP 连接断开 → nanobot 子进程可能被终止
+  → session JSONL 未完整写入 → 助手回复丢失
+```
+
+### 8.2 解决方案
+
+**原则：server_v2.py 不需要重启就能 serve 新的前端构建产物。**
+
+因为 `_serve_static()` 方法每次请求都从磁盘读取文件，所以 `vite build` 产生新的 `dist/` 文件后，用户只需刷新浏览器即可看到新 UI，无需重启 server。
+
+**防护措施：**
+
+1. **进程隔离**：`subprocess.run(..., start_new_session=True)` 让 nanobot agent 子进程脱离 server 的进程组。即使 server 意外被杀，nanobot 仍能完成任务并写入 session。
+
+2. **操作规范**：nanobot 在修改前端代码时，应该：
+   - ✅ 修改源码 → `vite build` → 通知用户刷新浏览器
+   - ❌ 不要重启 server_v2.py（没有必要）
+   - ❌ 不要杀掉 server_v2.py 进程
+
+3. **前后端分离**：
+   - 前端静态文件通过 `dist/` 目录 serve，文件名含 hash，不会缓存冲突
+   - API 端点 (`/api/*`) 与静态文件服务互不影响
+   - `vite build` 是纯文件操作，不影响运行中的 server
+
+### 8.3 操作指南（给 nanobot 自己看）
+
+当通过 Web Chat UI 收到修改前端代码的请求时：
+1. 修改前端源码（`.tsx`, `.css` 等）
+2. 执行 `cd frontend && npx vite build`
+3. `git add -A && git commit -m "..."`
+4. 回复用户："已更新，请刷新浏览器查看"
+5. **不要重启 server_v2.py**
+
+---
+
 *本文档将随开发进展持续更新。*

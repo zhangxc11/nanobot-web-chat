@@ -120,6 +120,12 @@
 - T6.1: 工具调用紧凑化 — 单行显示 `▸ tool_name → 摘要`，可点击展开
 - T6.2: Sidebar 折叠后显示 ☰ 展开按钮
 - Issue #2 确认为旧 UI bug，无需修复
+- 中间有一次从新 UI 发送的修改请求，nanobot 执行了代码修改但因 server 重启导致任务未完整完成（未 commit、session 未记录），已手动补提交
+
+### 2026-02-25 自修改安全架构分析
+- 分析了 server_v2.py 在 nanobot 修改前端代码时的"自杀"问题
+- 解决方案：server 不需要重启（静态文件每次从磁盘读取）+ subprocess 进程隔离（start_new_session=True）
+- 更新了架构文档第八章：自修改安全架构
 
 ---
 
