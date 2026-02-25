@@ -11,6 +11,7 @@ Usage: python3 worker.py [--port 8082]
 
 import http.server
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -20,13 +21,28 @@ for i, arg in enumerate(sys.argv):
     if arg == '--port' and i + 1 < len(sys.argv):
         PORT = int(sys.argv[i + 1])
 
+LOG_FILE = '/tmp/nanobot-worker.log'
+
+# ── Logging setup ──
+logger = logging.getLogger('worker')
+logger.setLevel(logging.DEBUG)
+_fmt = logging.Formatter('[%(asctime)s] %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+_fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
+_fh.setLevel(logging.DEBUG)
+_fh.setFormatter(_fmt)
+_sh = logging.StreamHandler(sys.stderr)
+_sh.setLevel(logging.INFO)
+_sh.setFormatter(_fmt)
+logger.addHandler(_fh)
+logger.addHandler(_sh)
+
 
 class WorkerHandler(http.server.BaseHTTPRequestHandler):
     """Handles nanobot agent execution requests."""
 
     def log_message(self, format, *args):
         if args:
-            print(f"[worker {self.log_date_time_string()}] {args[0]}")
+            logger.info(args[0])
 
     def _read_json_body(self):
         """Read and parse JSON request body. Returns (data, error_sent)."""
@@ -67,6 +83,8 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         session_key = data['session_key'].strip()
         message = data['message'].strip()
 
+        logger.info(f"Execute (blocking): session={session_key}, message={message[:80]}...")
+
         try:
             result = subprocess.run(
                 ['nanobot', 'agent', '-m', message, '--no-markdown', '-s', session_key],
@@ -81,10 +99,13 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 reply = f'(stderr) {result.stderr.strip()}'
             if not reply:
                 reply = '(无回复)'
+            logger.info(f"Execute done: session={session_key}, reply_len={len(reply)}")
             self._send_json({'reply': reply, 'success': True})
         except subprocess.TimeoutExpired:
+            logger.error(f"Execute timeout: session={session_key}")
             self._send_json({'reply': '⏱️ 请求超时，请稍后重试', 'success': False}, 504)
         except Exception as e:
+            logger.error(f"Execute error: session={session_key}, error={e}")
             self._send_json({'reply': f'❌ 错误: {str(e)}', 'success': False}, 500)
 
     # ── SSE streaming endpoint ──
@@ -96,6 +117,8 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         session_key = data['session_key'].strip()
         message = data['message'].strip()
 
+        logger.info(f"Stream: session={session_key}, message={message[:80]}...")
+
         # Send SSE headers
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
@@ -104,6 +127,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
 
+        proc = None
         try:
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
@@ -116,7 +140,10 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 env=env,
             )
 
+            logger.debug(f"Spawned nanobot agent PID={proc.pid} for session={session_key}")
+
             # Read stdout line by line, send progress events
+            progress_count = 0
             for line in proc.stdout:
                 line = line.rstrip('\n')
                 if not line:
@@ -128,30 +155,38 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                     if content.startswith('↳'):
                         content = content[1:].lstrip()  # remove ↳ prefix
                     self._send_sse('progress', {'text': content})
+                    progress_count += 1
                 # Skip nanobot header and final response lines
                 # (we'll read the actual result from JSONL)
 
             proc.wait(timeout=300)
 
             if proc.returncode == 0:
+                logger.info(f"Stream done: session={session_key}, progress_steps={progress_count}")
                 self._send_sse('done', {'success': True})
             else:
                 stderr_out = proc.stderr.read() if proc.stderr else ''
+                logger.error(f"Stream failed: session={session_key}, code={proc.returncode}, stderr={stderr_out[:200]}")
                 self._send_sse('error', {
                     'message': f'nanobot exited with code {proc.returncode}',
                     'stderr': stderr_out.strip()[-500:] if stderr_out else '',
                 })
 
         except subprocess.TimeoutExpired:
-            proc.kill()
+            if proc:
+                proc.kill()
+            logger.error(f"Stream timeout: session={session_key}")
             self._send_sse('error', {'message': '⏱️ 请求超时，请稍后重试'})
         except BrokenPipeError:
+            logger.warning(f"Client disconnected during stream: session={session_key}")
             # Client disconnected — kill the subprocess
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            if proc:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
         except Exception as e:
+            logger.error(f"Stream error: session={session_key}, error={e}")
             try:
                 self._send_sse('error', {'message': f'❌ 错误: {str(e)}'})
             except BrokenPipeError:
@@ -182,12 +217,16 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     server = http.server.HTTPServer(('127.0.0.1', PORT), WorkerHandler)
+    logger.info(f"Worker starting on http://localhost:{PORT}")
+    logger.info(f"Log file: {LOG_FILE}")
     print(f"🔧 nanobot Worker running at http://localhost:{PORT}")
     print(f"   Health: http://localhost:{PORT}/health")
+    print(f"   Log: {LOG_FILE}")
     print(f"   Endpoints: POST /execute, POST /execute-stream (SSE)")
     print(f"   Press Ctrl+C to stop")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n👋 Worker stopped.")
+        logger.info("Worker stopped by user")
         server.server_close()

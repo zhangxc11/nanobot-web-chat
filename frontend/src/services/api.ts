@@ -18,6 +18,16 @@ export async function createSession(): Promise<Session> {
   return res.json();
 }
 
+export async function renameSession(sessionId: string, summary: string): Promise<{ id: string; summary: string }> {
+  const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summary }),
+  });
+  if (!res.ok) throw new Error(`Failed to rename session: ${res.status}`);
+  return res.json();
+}
+
 // ── Messages ──
 
 export async function fetchMessages(

@@ -124,6 +124,19 @@
   white-space: nowrap;
 }
 
+.sessionEditInput {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 2px 6px;
+  width: 100%;
+  outline: none;
+  box-sizing: border-box;
+}
+
 .sessionActive .sessionSummary {
   color: var(--accent);
 }

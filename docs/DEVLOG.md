@@ -19,6 +19,7 @@
 | Phase 8: Bug 修复 + 架构拆分 v1.2 | ✅ 已完成 | main |
 | Phase 9: 流式输出 (SSE Streaming) | ✅ 已完成 | main |
 | Phase 10: 工具调用折叠优化 v1.4 | ✅ 已完成 | main |
+| Phase 11: 自修改事故修复 + 日志 + Session 重命名 | 🔜 进行中 | main |
 
 ---
 
@@ -221,6 +222,29 @@
 - 展开后 `↳ tool_name → 摘要`，与流式输出 ProgressIndicator 风格一致
 - 每步可再展开查看完整输出
 - Git: `704cc6c`
+
+---
+
+## Phase 11: 自修改事故修复 + 日志 + Session 重命名
+
+### 事故分析 (2026-02-25 23:50)
+- **现象**：Web UI 发送 "新增功能，左侧的session需要可以支持编辑名称"，执行到一半中断
+- **根因**：nanobot 修改了 `gateway.py`（添加 PATCH 路由）后重启了 gateway（kill 旧进程 + 启动新进程），导致正在进行的 SSE 连接断开，前端报 "TypeError: Failed to fetch"
+- **影响**：代码修改已完成但未 build/commit，处于中间状态
+- **教训**：gateway 重启会断开 SSE 连接，即使 worker 不变，gateway 重启也会中断任务
+
+### 任务
+- ✅ **T11.1** 根因分析 — 确认 gateway 被 nanobot 重启导致 SSE 断开
+- ✅ **T11.2** 更新架构文档 §8.4 — Gateway 修改安全规则
+- ✅ **T11.3** 创建开发准则文档 `docs/GUIDELINES.md`
+- ✅ **T11.4** 添加日志模块 — gateway.py + worker.py 使用 Python logging
+  - 日志文件：`/tmp/nanobot-gateway.log` + `/tmp/nanobot-worker.log`
+  - 关键操作均有日志：请求处理、SSE 流、错误、session 操作
+- ✅ **T11.5** Session 重命名功能（代码已由之前的 nanobot 完成，本次 review + build + commit）
+  - 前端：SessionList 双击编辑、sessionStore.renameSession、api.renameSession
+  - 后端：gateway.py PATCH /api/sessions/:id + custom_name 存储在 JSONL metadata
+  - CSS：sessionEditInput 样式
+- ✅ **T11.6** 构建 + 测试 + commit
 
 ---
 

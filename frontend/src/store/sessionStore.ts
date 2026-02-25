@@ -11,6 +11,7 @@ interface SessionStore {
   fetchSessions: () => Promise<void>;
   setActiveSession: (id: string) => void;
   createSession: () => Promise<Session | null>;
+  renameSession: (id: string, summary: string) => Promise<boolean>;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -49,6 +50,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (err) {
       set({ error: String(err) });
       return null;
+    }
+  },
+
+  renameSession: async (id, summary) => {
+    try {
+      await api.renameSession(id, summary);
+      set((s) => ({
+        sessions: s.sessions.map((session) =>
+          session.id === id ? { ...session, summary } : session
+        ),
+      }));
+      return true;
+    } catch (err) {
+      set({ error: String(err) });
+      return false;
     }
   },
 }));

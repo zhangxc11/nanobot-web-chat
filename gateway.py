@@ -10,6 +10,7 @@ Usage: python3 gateway.py [--port 8081] [--worker-url http://127.0.0.1:8082]
 
 import http.server
 import json
+import logging
 import sys
 import os
 import glob
@@ -31,14 +32,29 @@ for i, arg in enumerate(sys.argv):
 SESSIONS_DIR = os.path.expanduser('~/.nanobot/workspace/sessions')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(SCRIPT_DIR, 'frontend', 'dist')
+LOG_FILE = '/tmp/nanobot-gateway.log'
+
+# ── Logging setup ──
+logger = logging.getLogger('gateway')
+logger.setLevel(logging.DEBUG)
+_fmt = logging.Formatter('[%(asctime)s] %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+_fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
+_fh.setLevel(logging.DEBUG)
+_fh.setFormatter(_fmt)
+_sh = logging.StreamHandler(sys.stderr)
+_sh.setLevel(logging.INFO)
+_sh.setFormatter(_fmt)
+logger.addHandler(_fh)
+logger.addHandler(_sh)
 
 
 class GatewayHandler(http.server.BaseHTTPRequestHandler):
     """REST API handler for nanobot Web Chat — Gateway."""
 
     def log_message(self, format, *args):
+        # Redirect http.server default logging to our logger
         if args:
-            print(f"[gateway {self.log_date_time_string()}] {args[0]}")
+            logger.info(args[0])
 
     def _send_json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
@@ -46,7 +62,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', len(body))
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
         self.wfile.write(body)
@@ -55,7 +71,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         """Handle CORS preflight requests."""
         self.send_response(204)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
@@ -123,6 +139,18 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
 
         self._send_json({'error': 'Not found'}, 404)
 
+    # ── PATCH routes ──
+
+    def do_PATCH(self):
+        path, params = self._parse_path()
+
+        route_params = self._match_route(path, '/api/sessions/:id')
+        if route_params:
+            self._handle_rename_session(route_params['id'])
+            return
+
+        self._send_json({'error': 'Not found'}, 404)
+
     # ── API handlers ──
 
     def _handle_get_sessions(self, params):
@@ -138,30 +166,34 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             first_user_content = ''
             message_count = 0
 
-            with open(filepath, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
 
-                    if obj.get('_type') == 'metadata':
-                        metadata = obj
-                        continue
+                        if obj.get('_type') == 'metadata':
+                            metadata = obj
+                            continue
 
-                    role = obj.get('role', '')
-                    if role in ('user', 'assistant', 'tool'):
-                        message_count += 1
+                        role = obj.get('role', '')
+                        if role in ('user', 'assistant', 'tool'):
+                            message_count += 1
 
-                    if role == 'user' and not first_user_content:
-                        content = obj.get('content', '')
-                        content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
-                        first_user_content = content[:80] if content else ''
+                        if role == 'user' and not first_user_content:
+                            content = obj.get('content', '')
+                            content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
+                            first_user_content = content[:80] if content else ''
+            except Exception as e:
+                logger.error(f"Failed to read session {session_id}: {e}")
+                continue
 
-            summary = first_user_content or session_id
+            summary = metadata.get('custom_name') or first_user_content or session_id
             last_active = metadata.get('updated_at', '')
             if not last_active:
                 mtime = os.path.getmtime(filepath)
@@ -176,6 +208,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             })
 
         sessions.sort(key=lambda s: s['lastActiveAt'], reverse=True)
+        logger.debug(f"Listed {len(sessions)} sessions")
         self._send_json({'sessions': sessions})
 
     def _handle_get_messages(self, session_id, params):
@@ -242,6 +275,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         has_more = len(all_messages) > limit
         messages = all_messages[-limit:] if has_more else all_messages
 
+        logger.debug(f"Messages for {session_id}: {len(messages)} returned, hasMore={has_more}")
         self._send_json({
             'messages': messages,
             'hasMore': has_more,
@@ -267,12 +301,70 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             }
             f.write(json.dumps(meta, ensure_ascii=False) + '\n')
 
+        logger.info(f"Created session: {session_id}")
         self._send_json({
             'id': session_id,
             'summary': '新对话',
             'lastActiveAt': datetime.now().isoformat(),
             'messageCount': 0,
         })
+
+    def _handle_rename_session(self, session_id):
+        """PATCH /api/sessions/:id — rename a session.
+        
+        Request body: { "summary": "新名称" }
+        Updates the metadata line in the JSONL file to include a custom_name field.
+        """
+        if '/' in session_id or '..' in session_id:
+            self._send_json({'error': 'Invalid session id'}, 400)
+            return
+
+        filepath = os.path.join(SESSIONS_DIR, session_id + '.jsonl')
+        if not os.path.exists(filepath):
+            self._send_json({'error': 'Session not found'}, 404)
+            return
+
+        data = self._read_body()
+        new_name = data.get('summary', '').strip()
+        if not new_name:
+            self._send_json({'error': 'Empty summary'}, 400)
+            return
+
+        # Read all lines, update metadata line with custom_name
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+
+            updated = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    obj = json.loads(stripped)
+                    if obj.get('_type') == 'metadata':
+                        obj['custom_name'] = new_name
+                        from datetime import datetime
+                        obj['updated_at'] = datetime.now().isoformat()
+                        lines[i] = json.dumps(obj, ensure_ascii=False) + '\n'
+                        updated = True
+                        break
+                except json.JSONDecodeError:
+                    continue
+
+            if not updated:
+                logger.error(f"Metadata not found in session {session_id}")
+                self._send_json({'error': 'Metadata not found in session file'}, 500)
+                return
+
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+
+            logger.info(f"Renamed session {session_id} to '{new_name}'")
+            self._send_json({'id': session_id, 'summary': new_name})
+        except Exception as e:
+            logger.error(f"Failed to rename session {session_id}: {e}")
+            self._send_json({'error': f'Rename failed: {str(e)}'}, 500)
 
     def _get_session_key(self, session_id):
         """Read the session key from the JSONL metadata line."""
@@ -308,6 +400,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             return
 
         session_key = self._get_session_key(session_id)
+        logger.info(f"Send message to session {session_id} (key={session_key}): {message[:80]}...")
 
         # Forward to worker's SSE streaming endpoint
         try:
@@ -345,8 +438,10 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
                     if line.strip() == b'':
                         self.wfile.flush()
 
+            logger.info(f"SSE stream completed for session {session_id}")
+
         except urllib.error.URLError as e:
-            # If headers not yet sent, send JSON error
+            logger.error(f"Worker unavailable for session {session_id}: {e.reason}")
             try:
                 self._send_json({
                     'reply': f'❌ Worker 服务不可用: {str(e.reason)}'
@@ -354,8 +449,9 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
         except BrokenPipeError:
-            pass  # Client disconnected
+            logger.warning(f"Client disconnected during SSE stream for session {session_id}")
         except Exception as e:
+            logger.error(f"SSE stream error for session {session_id}: {e}")
             try:
                 self._send_json({
                     'reply': f'❌ 转发失败: {str(e)}'
@@ -407,13 +503,18 @@ if __name__ == '__main__':
     class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         daemon_threads = True
     server = ThreadedHTTPServer(('127.0.0.1', PORT), GatewayHandler)
+    logger.info(f"Gateway starting on http://localhost:{PORT}")
+    logger.info(f"Worker: {WORKER_URL}")
+    logger.info(f"Log file: {LOG_FILE}")
     print(f"🐈 nanobot Gateway running at http://localhost:{PORT}")
     print(f"   Worker: {WORKER_URL}")
     print(f"   Health: http://localhost:{PORT}/api/health")
+    print(f"   Log: {LOG_FILE}")
     print(f"   Threaded: yes (concurrent requests supported)")
     print(f"   Press Ctrl+C to stop")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n👋 Gateway stopped.")
+        logger.info("Gateway stopped by user")
         server.server_close()

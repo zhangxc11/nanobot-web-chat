@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react';
 import { useSessionStore } from '@/store/sessionStore';
 import styles from './Sidebar.module.css';
 
@@ -8,6 +9,7 @@ interface SessionItemProps {
   messageCount: number;
   isActive: boolean;
   onClick: () => void;
+  onRename: (id: string, newName: string) => void;
 }
 
 function formatTime(isoStr: string): string {
@@ -25,13 +27,61 @@ function formatTime(isoStr: string): string {
   }
 }
 
-function SessionItem({ summary, lastActiveAt, isActive, onClick }: SessionItemProps) {
+function SessionItem({ id, summary, lastActiveAt, isActive, onClick, onRename }: SessionItemProps) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(summary);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditValue(summary);
+    setEditing(true);
+  };
+
+  const handleConfirm = () => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== summary) {
+      onRename(id, trimmed);
+    }
+    setEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleConfirm();
+    } else if (e.key === 'Escape') {
+      setEditing(false);
+      setEditValue(summary);
+    }
+  };
+
   return (
     <div
       className={`${styles.sessionItem} ${isActive ? styles.sessionActive : ''}`}
       onClick={onClick}
+      onDoubleClick={handleDoubleClick}
+      title="双击编辑名称"
     >
-      <div className={styles.sessionSummary}>{summary}</div>
+      {editing ? (
+        <input
+          ref={inputRef}
+          className={styles.sessionEditInput}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onBlur={handleConfirm}
+          onKeyDown={handleKeyDown}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <div className={styles.sessionSummary}>{summary}</div>
+      )}
       <div className={styles.sessionMeta}>
         <span className={styles.sessionTime}>{formatTime(lastActiveAt)}</span>
       </div>
@@ -40,7 +90,11 @@ function SessionItem({ summary, lastActiveAt, isActive, onClick }: SessionItemPr
 }
 
 export default function SessionList() {
-  const { sessions, activeSessionId, setActiveSession, loading, error, fetchSessions } = useSessionStore();
+  const { sessions, activeSessionId, setActiveSession, loading, error, fetchSessions, renameSession } = useSessionStore();
+
+  const handleRename = async (id: string, newName: string) => {
+    await renameSession(id, newName);
+  };
 
   if (loading && sessions.length === 0) {
     return (
@@ -78,6 +132,7 @@ export default function SessionList() {
           messageCount={session.messageCount}
           isActive={session.id === activeSessionId}
           onClick={() => setActiveSession(session.id)}
+          onRename={handleRename}
         />
       ))}
     </div>
