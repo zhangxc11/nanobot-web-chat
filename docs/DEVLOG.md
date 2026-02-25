@@ -19,7 +19,7 @@
 | Phase 8: Bug 修复 + 架构拆分 v1.2 | ✅ 已完成 | main |
 | Phase 9: 流式输出 (SSE Streaming) | ✅ 已完成 | main |
 | Phase 10: 工具调用折叠优化 v1.4 | ✅ 已完成 | main |
-| Phase 11: 自修改事故修复 + 日志 + Session 重命名 | 🔜 进行中 | main |
+| Phase 11: 自修改事故修复 + 日志 + Session 重命名 | ✅ 已完成 | main |
 
 ---
 
