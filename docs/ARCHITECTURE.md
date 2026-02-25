@@ -485,4 +485,50 @@ main          ← 稳定版本
 
 ---
 
+## 七、工作策略与断点恢复
+
+### 7.1 开发连续性保障
+
+由于当前 Web UI session 不稳定，可能丢失历史记录，采用以下策略确保开发过程不中断：
+
+1. **开发工作日志** (`docs/DEVLOG.md`)
+   - 记录每一步的开发操作、完成状态、遇到的问题
+   - 新的 AI session 可以通过阅读此文件恢复上下文
+
+2. **频繁 Git 提交**
+   - 每完成一个小功能点就 commit
+   - 使用 feature 分支开发，阶段完成后 merge 到 develop/main
+
+3. **架构文档实时更新**
+   - 本文件记录当前进展、下一步计划
+   - 任何设计变更同步更新
+
+### 7.2 当前进展 & 下一步
+
+**当前状态**：Phase 1 进行中 — 基础布局实现
+
+**已完成**：
+- 项目脚手架（Vite + React + TS）
+- 依赖安装（antd, zustand, react-markdown 等）
+- 类型定义、Store 骨架、API service 骨架
+- 目录结构
+
+**下一步**：
+- 实现 App.tsx 根组件（TabBar + 模块切换）
+- 实现各页面组件
+- 全局暗色主题
+- Vite proxy 配置
+- 验证前端可运行
+
+### 7.3 断点恢复指南
+
+如果 session 丢失，新 session 应：
+1. 阅读 `docs/ARCHITECTURE.md` — 了解架构设计
+2. 阅读 `docs/DEVLOG.md` — 了解开发进展和下一步
+3. 阅读 `docs/REQUIREMENTS.md` — 了解需求
+4. 查看 `git log` — 了解代码变更历史
+5. 从 DEVLOG.md 中最后一个未完成的任务继续
+
+---
+
 *本文档将随开发进展持续更新。*
