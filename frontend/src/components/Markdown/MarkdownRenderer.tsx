@@ -3,8 +3,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { Components } from 'react-markdown';
+import { common, createLowlight } from 'lowlight';
 import 'highlight.js/styles/github-dark.css';
 import styles from './MarkdownRenderer.module.css';
+
+// Use common languages only (~40 languages) instead of all (~190)
+const lowlight = createLowlight(common);
 
 interface MarkdownRendererProps {
   content: string;
@@ -44,7 +48,6 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
 }
 
 const components: Partial<Components> = {
-  // Override <pre> to remove default wrapper, CodeBlock handles it
   pre({ children }) {
     return <>{children}</>;
   },
@@ -56,7 +59,7 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
     <div className={styles.markdown}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
+        rehypePlugins={[[rehypeHighlight, { lowlight }]]}
         components={components}
       >
         {content}

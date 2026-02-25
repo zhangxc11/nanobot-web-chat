@@ -12,8 +12,8 @@
 | Phase 1: 脚手架 & 基础布局 | ✅ 已完成 | merged to develop |
 | Phase 2: 后端 API + Session 管理 | ✅ 已完成 | merged to develop |
 | Phase 3: 交互完善 | ✅ 已完成 | merged to develop |
-| Phase 4: Markdown & 代码高亮 | 🔄 进行中 | feat/phase4-markdown |
-| Phase 5: 完善 & 部署 | ⏳ 待开始 | |
+| Phase 4: Markdown & 代码高亮 | ✅ 已完成 | merged to develop |
+| Phase 5: 完善 & 部署 | 🔄 进行中 | feat/phase5-polish |
 
 ---
 
@@ -57,18 +57,18 @@
 
 ## Phase 4: Markdown 渲染 & 代码高亮
 
-- 🔜 **T4.1** 安装依赖 + MarkdownRenderer 组件（react-markdown + remark-gfm）
-- ⏳ **T4.2** CodeBlock 组件（highlight.js + 复制按钮）
-- ⏳ **T4.3** 集成到 MessageItem，替换纯文本渲染
-- ⏳ **T4.4** Phase 4 集成测试 & merge
+- ✅ **T4.1** MarkdownRenderer + CodeBlock（react-markdown + remark-gfm + rehype-highlight）
+- ✅ **T4.2** CodeBlock: 语言标签 + 复制按钮 + github-dark 主题
+- ✅ **T4.3** 集成到 MessageItem（助手消息 Markdown, 用户消息纯文本）
+- ✅ **T4.4** 优化 bundle splitting + 集成测试通过
 
 ---
 
 ## Phase 5: 完善 & 部署
 
-- ⏳ **T5.1** 生产构建：server_v2.py serve 前端 dist/
-- ⏳ **T5.2** 替换 server.py（确认新版完全可用后）
-- ⏳ **T5.3** 错误处理 & 边界情况
+- 🔜 **T5.1** 生产构建：server_v2.py serve 前端 dist/
+- ⏳ **T5.2** 错误处理 & 边界情况（网络错误提示、空状态优化）
+- ⏳ **T5.3** 端到端手动测试（启动 server_v2 + 打开前端完整流程）
 - ⏳ **T5.4** merge to main，发布
 
 ---
@@ -89,6 +89,12 @@
 - T3.3: 新建 Session 后自动选中 + 光标聚焦
 - T3.4: IntersectionObserver 无限滚动加载历史消息
 - T3.5: tsc + vite build 通过
+
+### 2026-02-25 Phase 4 完成
+- T4.1: MarkdownRenderer（react-markdown + remark-gfm + rehype-highlight）
+- T4.2: CodeBlock（语言标签 + 复制按钮 + github-dark）
+- T4.3: 集成到 MessageItem（助手=Markdown, 用户=纯文本）
+- T4.4: Bundle splitting 优化（3 chunks, 无 500KB 警告）
 
 ---
 
