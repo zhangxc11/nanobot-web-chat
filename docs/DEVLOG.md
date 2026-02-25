@@ -17,6 +17,7 @@
 | Phase 6: 迭代优化 v1.1 | ✅ 已完成 | merged to main |
 | Phase 7: Bug 修复 v1.2 | ✅ 已完成 | main |
 | Phase 8: Bug 修复 + 架构拆分 v1.2 | ✅ 已完成 | main |
+| Phase 9: 流式输出 (SSE Streaming) | ✅ 已完成 | main |
 
 ---
 
@@ -181,6 +182,19 @@
 - 端到端测试通过：health, sessions, messages, chat forwarding
 - 启动方式：`cd web-chat && bash start.sh` 或 `open http://127.0.0.1:8081`
 - server_v2.py 保留作为历史参考，gateway.py 是其拆分后的替代品
+
+### 2026-02-25 Phase 9: 流式输出 (SSE Streaming) ✅
+- **需求**: Web UI 提交命令后实时看到每一步进展（像 CLI 的 `↳` 步骤），而非等待全部完成
+- **方案**: Server-Sent Events (SSE) 流式输出
+- **改动文件**:
+  - `worker.py`: 新增 `/execute-stream` SSE 端点，`subprocess.Popen` 逐行读取 nanobot stdout
+  - `gateway.py`: SSE 流转发 + `ThreadingMixIn` 支持并发请求（解决 SSE 阻塞问题）
+  - `api.ts`: `sendMessageStream()` 使用 fetch ReadableStream 解析 SSE events
+  - `messageStore.ts`: `progressSteps` 状态 + 任务完成后从 JSONL 重新加载消息
+  - `MessageList.tsx`: `ProgressIndicator` 组件替代 `TypingIndicator`，实时显示 `↳ step`
+  - `MessageList.module.css`: progress 步骤样式 + fadeIn 动画
+- **SSE 事件类型**: `progress`（步骤文本）、`done`（完成）、`error`（错误）
+- **关键设计**: 任务完成后从 JSONL 重新加载消息（而非解析 stdout），确保 tool calls 等完整显示
 
 ---
 
