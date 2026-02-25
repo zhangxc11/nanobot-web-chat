@@ -10,6 +10,7 @@ interface MessageStore {
   loading: boolean;
   sending: boolean;
   error: string | null;
+  progressSteps: string[];    // real-time progress steps from SSE
   loadMessages: (sessionId: string) => Promise<void>;
   loadMoreMessages: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, content: string) => Promise<void>;
@@ -24,6 +25,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   loading: false,
   sending: false,
   error: null,
+  progressSteps: [],
 
   loadMessages: async (sessionId) => {
     set({ loading: true, error: null, messages: [], hasMore: false });
@@ -64,25 +66,44 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       content,
       timestamp: new Date().toISOString(),
     };
-    set((s) => ({ messages: [...s.messages, userMsg], sending: true, error: null }));
+    set((s) => ({
+      messages: [...s.messages, userMsg],
+      sending: true,
+      error: null,
+      progressSteps: [],
+    }));
 
     try {
-      const data = await api.sendMessage(sessionId, content);
-      const assistantMsg: Message = {
-        id: `reply_${Date.now()}`,
-        role: 'assistant',
-        content: data.reply || '',
-        timestamp: new Date().toISOString(),
-      };
-      set((s) => ({ messages: [...s.messages, assistantMsg], sending: false }));
+      await new Promise<void>((resolve, reject) => {
+        api.sendMessageStream(sessionId, content, {
+          onProgress: (text) => {
+            set((s) => ({
+              progressSteps: [...s.progressSteps, text],
+            }));
+          },
+          onDone: () => resolve(),
+          onError: (msg) => reject(new Error(msg)),
+        });
+      });
+
+      // Task completed — reload messages from JSONL for accurate display
+      // (includes tool calls, proper message IDs, etc.)
+      const data = await api.fetchMessages(sessionId, PAGE_SIZE);
+      set({
+        messages: data.messages || [],
+        hasMore: data.hasMore ?? false,
+        sending: false,
+        progressSteps: [],
+      });
+
       // Refresh session list to update ordering and summary
       useSessionStore.getState().fetchSessions();
     } catch (err) {
-      set({ sending: false, error: String(err) });
+      set({ sending: false, progressSteps: [], error: String(err) });
     }
   },
 
   clearMessages: () => {
-    set({ messages: [], hasMore: false, error: null });
+    set({ messages: [], hasMore: false, error: null, progressSteps: [] });
   },
 }));

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import type { Message } from '@/types';
 import { MarkdownRenderer } from '@/components/Markdown';
 import styles from './MessageList.module.css';
@@ -121,7 +121,7 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
  */
 export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
   // Build parts: each is either a text segment or a tool call line
-  const parts: JSX.Element[] = [];
+  const parts: React.JSX.Element[] = [];
   // Track which tool messages have been matched to a tool_calls entry
   const matchedToolIds = new Set<string>();
 

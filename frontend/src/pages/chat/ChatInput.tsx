@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, KeyboardEvent, ChangeEvent } from 'react';
+import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type ChangeEvent } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { useSessionStore } from '@/store/sessionStore';
 import styles from './ChatInput.module.css';

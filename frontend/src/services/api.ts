@@ -49,3 +49,113 @@ export async function sendMessage(
   if (!res.ok) throw new Error(`Failed to send message: ${res.status}`);
   return res.json();
 }
+
+// ── SSE Streaming ──
+
+export interface StreamCallbacks {
+  onProgress: (text: string) => void;
+  onDone: () => void;
+  onError: (message: string) => void;
+}
+
+/**
+ * Send a message and receive SSE progress events in real-time.
+ * Returns an AbortController so the caller can cancel the request.
+ */
+export function sendMessageStream(
+  sessionId: string,
+  message: string,
+  callbacks: StreamCallbacks,
+): AbortController {
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message }),
+          signal: controller.signal,
+        }
+      );
+
+      if (!res.ok) {
+        callbacks.onError(`HTTP ${res.status}`);
+        return;
+      }
+
+      const contentType = res.headers.get('Content-Type') || '';
+
+      // SSE stream
+      if (contentType.includes('text/event-stream') && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE events from buffer
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop() || '';  // keep incomplete event in buffer
+
+          for (const part of parts) {
+            const lines = part.split('\n');
+            let eventType = '';
+            let eventData = '';
+
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                eventType = line.slice(7);
+              } else if (line.startsWith('data: ')) {
+                eventData = line.slice(6);
+              }
+            }
+
+            if (!eventType || !eventData) continue;
+
+            try {
+              const parsed = JSON.parse(eventData);
+              switch (eventType) {
+                case 'progress':
+                  callbacks.onProgress(parsed.text || '');
+                  break;
+                case 'done':
+                  callbacks.onDone();
+                  return;
+                case 'error':
+                  callbacks.onError(parsed.message || '未知错误');
+                  return;
+              }
+            } catch {
+              // Ignore malformed JSON
+            }
+          }
+        }
+
+        // Stream ended without explicit done event
+        callbacks.onDone();
+      } else {
+        // Fallback: legacy JSON response
+        const data = await res.json();
+        if (data.reply) {
+          callbacks.onDone();
+        } else {
+          callbacks.onError('Unexpected response format');
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        return;  // Cancelled by user, not an error
+      }
+      callbacks.onError(err instanceof Error ? err.message : '网络错误');
+    }
+  })();
+
+  return controller;
+}

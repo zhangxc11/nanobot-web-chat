@@ -296,7 +296,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         return f'cli:{session_id}'
 
     def _handle_send_message(self, session_id):
-        """POST /api/sessions/:id/messages — forward to Worker service."""
+        """POST /api/sessions/:id/messages — forward to Worker as SSE stream."""
         if '/' in session_id or '..' in session_id:
             self._send_json({'error': 'Invalid session id'}, 400)
             return
@@ -309,7 +309,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
 
         session_key = self._get_session_key(session_id)
 
-        # Forward to worker
+        # Forward to worker's SSE streaming endpoint
         try:
             worker_data = json.dumps({
                 'session_key': session_key,
@@ -317,23 +317,51 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             }).encode('utf-8')
 
             req = urllib.request.Request(
-                f'{WORKER_URL}/execute',
+                f'{WORKER_URL}/execute-stream',
                 data=worker_data,
                 headers={'Content-Type': 'application/json'},
                 method='POST',
             )
-            # Timeout slightly longer than worker's subprocess timeout (300s)
+
+            # SSE response headers
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('X-Accel-Buffering', 'no')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.end_headers()
+
+            # Stream worker's SSE response line by line
             with urllib.request.urlopen(req, timeout=330) as resp:
-                result = json.loads(resp.read().decode('utf-8'))
-                self._send_json({'reply': result.get('reply', '(无回复)')})
+                while True:
+                    line = resp.readline()
+                    if not line:
+                        break
+                    self.wfile.write(line)
+                    # Flush after each blank line (SSE event boundary)
+                    if line.strip() == b'':
+                        self.wfile.flush()
+
         except urllib.error.URLError as e:
-            self._send_json({
-                'reply': f'❌ Worker 服务不可用: {str(e.reason)}'
-            }, 502)
+            # If headers not yet sent, send JSON error
+            try:
+                self._send_json({
+                    'reply': f'❌ Worker 服务不可用: {str(e.reason)}'
+                }, 502)
+            except Exception:
+                pass
+        except BrokenPipeError:
+            pass  # Client disconnected
         except Exception as e:
-            self._send_json({
-                'reply': f'❌ 转发失败: {str(e)}'
-            }, 500)
+            try:
+                self._send_json({
+                    'reply': f'❌ 转发失败: {str(e)}'
+                }, 500)
+            except Exception:
+                pass
 
     def _serve_static(self, path):
         """Serve static files from frontend/dist with SPA fallback."""
@@ -375,10 +403,14 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    server = http.server.HTTPServer(('127.0.0.1', PORT), GatewayHandler)
+    import socketserver
+    class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+        daemon_threads = True
+    server = ThreadedHTTPServer(('127.0.0.1', PORT), GatewayHandler)
     print(f"🐈 nanobot Gateway running at http://localhost:{PORT}")
     print(f"   Worker: {WORKER_URL}")
     print(f"   Health: http://localhost:{PORT}/api/health")
+    print(f"   Threaded: yes (concurrent requests supported)")
     print(f"   Press Ctrl+C to stop")
     try:
         server.serve_forever()

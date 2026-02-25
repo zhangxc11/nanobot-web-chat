@@ -4,20 +4,38 @@ import { useSessionStore } from '@/store/sessionStore';
 import MessageItem, { groupMessages, AssistantTurnGroup } from './MessageItem';
 import styles from './MessageList.module.css';
 
-function TypingIndicator() {
+function ProgressIndicator({ steps }: { steps: string[] }) {
   return (
     <div className={`${styles.message} ${styles.assistantMessage}`}>
-      <div className={styles.typingBubble}>
-        <span className={styles.dot} />
-        <span className={styles.dot} />
-        <span className={styles.dot} />
+      <div className={styles.progressBubble}>
+        {steps.length === 0 ? (
+          <div className={styles.typingBubble}>
+            <span className={styles.dot} />
+            <span className={styles.dot} />
+            <span className={styles.dot} />
+          </div>
+        ) : (
+          <div className={styles.progressSteps}>
+            {steps.map((step, i) => (
+              <div key={i} className={styles.progressStep}>
+                <span className={styles.progressArrow}>↳</span>
+                <span className={styles.progressText}>{step}</span>
+              </div>
+            ))}
+            <div className={styles.typingBubble}>
+              <span className={styles.dot} />
+              <span className={styles.dot} />
+              <span className={styles.dot} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 export default function MessageList() {
-  const { messages, loading, hasMore, sending, error } = useMessageStore();
+  const { messages, loading, hasMore, sending, error, progressSteps } = useMessageStore();
   const { activeSessionId } = useSessionStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -69,11 +87,12 @@ export default function MessageList() {
     prevMsgCountRef.current = messages.length;
   }, [messages]);
 
+  // Auto-scroll when new progress steps arrive or sending state changes
   useEffect(() => {
     if (sending) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [sending]);
+  }, [sending, progressSteps]);
 
   // IntersectionObserver for infinite scroll (load older messages)
   const handleLoadMore = useCallback(() => {
@@ -153,7 +172,7 @@ export default function MessageList() {
           // assistant-turn: render compactly
           return <AssistantTurnGroup key={`turn-${idx}`} messages={group.messages} />;
         })}
-        {sending && <TypingIndicator />}
+        {sending && <ProgressIndicator steps={progressSteps} />}
         {error && messages.length > 0 && (
           <div className={styles.errorBanner}>
             ⚠️ {error}
