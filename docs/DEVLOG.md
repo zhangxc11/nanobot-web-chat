@@ -20,7 +20,7 @@
 | Phase 9: 流式输出 (SSE Streaming) | ✅ 已完成 | main |
 | Phase 10: 工具调用折叠优化 v1.4 | ✅ 已完成 | main |
 | Phase 11: 自修改事故修复 + 日志 + Session 重命名 | ✅ 已完成 | main |
-| Phase 12: 优雅降级 — Gateway 重启不中断任务 | 🔜 进行中 | main |
+| Phase 12: 优雅降级 — Gateway 重启不中断任务 | ✅ 已完成 | main |
 
 ---
 
@@ -259,12 +259,12 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 4. 任务完成后从 JSONL 重载消息
 
 ### 任务
-- 🔜 **T12.1** Worker: 重构为后台线程执行 + task registry + BrokenPipe 不杀子进程
-- **T12.2** Worker: 新增 `GET /tasks/:session_key` 查询接口
-- **T12.3** Gateway: 新增 `GET /api/sessions/:id/task-status` 转发
-- **T12.4** 前端: SSE 断开后轮询恢复 + 状态展示
-- **T12.5** 更新开发准则: 允许修改 gateway.py（降级保护）
-- **T12.6** 构建 + 测试 + commit
+- ✅ **T12.1** Worker: 重构为后台线程执行 + task registry + BrokenPipe 不杀子进程
+- ✅ **T12.2** Worker: 新增 `GET /tasks/:session_key` 查询接口
+- ✅ **T12.3** Gateway: 新增 `GET /api/sessions/:id/task-status` 转发
+- ✅ **T12.4** 前端: SSE 断开后轮询恢复 + 状态展示
+- ✅ **T12.5** 更新开发准则: 允许修改 gateway.py（降级保护）
+- ✅ **T12.6** 构建 + 测试 + commit
 
 ---
 
