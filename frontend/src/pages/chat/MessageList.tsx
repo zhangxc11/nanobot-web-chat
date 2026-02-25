@@ -4,8 +4,20 @@ import { useSessionStore } from '@/store/sessionStore';
 import MessageItem from './MessageItem';
 import styles from './MessageList.module.css';
 
+function TypingIndicator() {
+  return (
+    <div className={`${styles.message} ${styles.assistantMessage}`}>
+      <div className={styles.typingBubble}>
+        <span className={styles.dot} />
+        <span className={styles.dot} />
+        <span className={styles.dot} />
+      </div>
+    </div>
+  );
+}
+
 export default function MessageList() {
-  const { messages, loading, hasMore } = useMessageStore();
+  const { messages, loading, hasMore, sending } = useMessageStore();
   const { activeSessionId } = useSessionStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -22,10 +34,10 @@ export default function MessageList() {
     }
   }, [activeSessionId, loadMessages, clearMessages]);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive or sending
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, sending]);
 
   if (!activeSessionId) {
     return (
@@ -54,6 +66,7 @@ export default function MessageList() {
       {messages.map((msg) => (
         <MessageItem key={msg.id} message={msg} />
       ))}
+      {sending && <TypingIndicator />}
       <div ref={bottomRef} />
     </div>
   );
