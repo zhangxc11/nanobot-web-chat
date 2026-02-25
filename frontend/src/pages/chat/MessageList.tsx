@@ -17,7 +17,7 @@ function TypingIndicator() {
 }
 
 export default function MessageList() {
-  const { messages, loading, hasMore, sending } = useMessageStore();
+  const { messages, loading, hasMore, sending, error } = useMessageStore();
   const { activeSessionId } = useSessionStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -106,6 +106,18 @@ export default function MessageList() {
     );
   }
 
+  if (error && messages.length === 0) {
+    return (
+      <div className={styles.emptyState}>
+        <span className={styles.emptyIcon}>⚠️</span>
+        <p>加载失败：{error}</p>
+        <button className={styles.retryButton} onClick={() => activeSessionId && loadMessages(activeSessionId)}>
+          重试
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.messageList} ref={scrollContainerRef}>
       <div className={styles.messageContent}>
@@ -119,6 +131,11 @@ export default function MessageList() {
           <MessageItem key={msg.id} message={msg} />
         ))}
         {sending && <TypingIndicator />}
+        {error && messages.length > 0 && (
+          <div className={styles.errorBanner}>
+            ⚠️ {error}
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
     </div>

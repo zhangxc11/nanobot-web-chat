@@ -40,7 +40,24 @@ function SessionItem({ summary, lastActiveAt, isActive, onClick }: SessionItemPr
 }
 
 export default function SessionList() {
-  const { sessions, activeSessionId, setActiveSession } = useSessionStore();
+  const { sessions, activeSessionId, setActiveSession, loading, error, fetchSessions } = useSessionStore();
+
+  if (loading && sessions.length === 0) {
+    return (
+      <div className={styles.emptyList}>
+        <p>加载中...</p>
+      </div>
+    );
+  }
+
+  if (error && sessions.length === 0) {
+    return (
+      <div className={styles.emptyList}>
+        <p style={{ color: '#ff4d4f' }}>⚠️ {error}</p>
+        <button className={styles.retryBtn} onClick={fetchSessions}>重试</button>
+      </div>
+    );
+  }
 
   if (sessions.length === 0) {
     return (

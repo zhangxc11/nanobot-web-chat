@@ -13,7 +13,7 @@
 | Phase 2: 后端 API + Session 管理 | ✅ 已完成 | merged to develop |
 | Phase 3: 交互完善 | ✅ 已完成 | merged to develop |
 | Phase 4: Markdown & 代码高亮 | ✅ 已完成 | merged to develop |
-| Phase 5: 完善 & 部署 | 🔄 进行中 | feat/phase5-polish |
+| Phase 5: 完善 & 部署 | ✅ 已完成 | merged to main |
 
 ---
 
@@ -66,10 +66,10 @@
 
 ## Phase 5: 完善 & 部署
 
-- 🔜 **T5.1** 生产构建：server_v2.py serve 前端 dist/
-- ⏳ **T5.2** 错误处理 & 边界情况（网络错误提示、空状态优化）
-- ⏳ **T5.3** 端到端手动测试（启动 server_v2 + 打开前端完整流程）
-- ⏳ **T5.4** merge to main，发布
+- ✅ **T5.1** 生产构建：server_v2.py serve 前端 dist/（SPA fallback + 静态资源缓存）
+- ✅ **T5.2** 错误处理 & 边界情况（网络错误提示、重试按钮、空状态优化）
+- ✅ **T5.3** 端到端测试通过（health, sessions, create, static, SPA fallback）
+- 🔜 **T5.4** merge to develop → main，发布
 
 ---
 
@@ -95,6 +95,12 @@
 - T4.2: CodeBlock（语言标签 + 复制按钮 + github-dark）
 - T4.3: 集成到 MessageItem（助手=Markdown, 用户=纯文本）
 - T4.4: Bundle splitting 优化（3 chunks, 无 500KB 警告）
+
+### 2026-02-25 Phase 5 完成 🎉
+- T5.1: server_v2.py 静态文件服务（SPA fallback + 目录遍历防护 + 资源缓存）
+- T5.2: 错误处理（MessageList/SessionList 错误状态 + 重试按钮）
+- T5.3: 端到端测试全部通过
+- T5.4: merge to main
 
 ---
 
