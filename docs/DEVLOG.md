@@ -18,7 +18,7 @@
 | Phase 7: Bug 修复 v1.2 | ✅ 已完成 | main |
 | Phase 8: Bug 修复 + 架构拆分 v1.2 | ✅ 已完成 | main |
 | Phase 9: 流式输出 (SSE Streaming) | ✅ 已完成 | main |
-| Phase 10: 工具调用折叠优化 v1.4 | 🔜 进行中 | main |
+| Phase 10: 工具调用折叠优化 v1.4 | ✅ 已完成 | main |
 
 ---
 
@@ -208,13 +208,19 @@
 - 展开后每步 `↳ tool_name → 摘要`，可再展开详情
 
 ### 任务
-- 🔜 **T10.1** 重构 `MessageItem.tsx` — AssistantTurnGroup 组件改造
+- ✅ **T10.1** 重构 `MessageItem.tsx` — AssistantTurnGroup 组件改造
   - 将工具调用部分抽取为 `ToolCallsCollapsible` 组件
   - 默认折叠，显示 `⚙ 使用了 N 个工具 ▸`
   - 展开后用 `↳ tool_name → 摘要` 格式（复用 ToolCallLine，改用 ↳ 箭头）
   - 每步可点击展开详情
-- **T10.2** 更新 CSS 样式 — 折叠摘要行、展开动画
-- **T10.3** 构建 + 测试 + commit
+- ✅ **T10.2** 更新 CSS 样式 — 折叠摘要行、展开动画
+- ✅ **T10.3** 构建 + 测试 + commit
+
+### 2026-02-25 Phase 10 完成 (v1.4)
+- 工具调用折叠优化：默认折叠为 `⚙ 使用了 N 个工具` 摘要行
+- 展开后 `↳ tool_name → 摘要`，与流式输出 ProgressIndicator 风格一致
+- 每步可再展开查看完整输出
+- Git: `704cc6c`
 
 ---
 
