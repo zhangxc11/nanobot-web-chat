@@ -21,6 +21,7 @@
 | Phase 10: 工具调用折叠优化 v1.4 | ✅ 已完成 | main |
 | Phase 11: 自修改事故修复 + 日志 + Session 重命名 | ✅ 已完成 | main |
 | Phase 12: 优雅降级 — Gateway 重启不中断任务 | ✅ 已完成 | main |
+| Phase 13: 工具调用折叠优化 — 前置文本一起折叠 | ✅ 已完成 | main |
 
 ---
 
@@ -265,6 +266,27 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 - ✅ **T12.4** 前端: SSE 断开后轮询恢复 + 状态展示
 - ✅ **T12.5** 更新开发准则: 允许修改 gateway.py（降级保护）
 - ✅ **T12.6** 构建 + 测试 + commit
+
+---
+
+## Phase 13: 工具调用折叠优化 — 前置文本一起折叠
+
+### 问题
+- Assistant 调用工具前的"思考/意图"文本（如 "让我查看一下..."）作为独立文本段显示
+- 折叠 tool calls 后仍能看到这些中间文本，折叠效果不完整
+
+### 解决方案
+- 重新定义"最终回复"：最后一条不含 `tool_calls` 的 assistant 消息的 `content`
+- 所有带 `tool_calls` 的 assistant 消息的 `content`（前置文本）归入折叠区域
+- 折叠区域按消息顺序交替显示：前置文本（斜体缩进）→ tool calls → 前置文本 → tool calls
+- 新增 `PrecedingText` 组件 + `precedingText` CSS 样式
+- `ToolCallsCollapsible` 重构为 `ToolProcessCollapsible`，接受 `ProcessItem[]`（text | tool）
+
+### 改动文件
+- `frontend/src/pages/chat/MessageItem.tsx` — 核心逻辑重构
+- `frontend/src/pages/chat/MessageList.module.css` — 新增 `.precedingText` 样式
+- `docs/REQUIREMENTS.md` — Issue #6
+- `docs/ARCHITECTURE.md` — §2.4 更新
 
 ---
 

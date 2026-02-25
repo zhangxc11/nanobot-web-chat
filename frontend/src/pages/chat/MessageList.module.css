@@ -160,6 +160,16 @@
   border-left: 2px solid var(--bg-hover);
 }
 
+/* ── Preceding Text (inside collapsible) ── */
+
+.precedingText {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  line-height: 1.5;
+  font-style: italic;
+}
+
 /* ── Individual Tool Call Line ── */
 
 .toolCallLine {
