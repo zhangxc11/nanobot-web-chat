@@ -72,7 +72,6 @@
   line-height: 1.6;
   font-size: 14px;
   word-break: break-word;
-  white-space: pre-wrap;
 }
 
 .userMessage .bubble {
@@ -88,7 +87,8 @@
 }
 
 .content {
-  /* preserve whitespace and newlines */
+  /* preserve whitespace and newlines for user messages (plain text) */
+  white-space: pre-wrap;
 }
 
 .timestamp {

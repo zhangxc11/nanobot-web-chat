@@ -345,7 +345,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 ['nanobot', 'agent', '-m', message, '--no-markdown', '-s', session_key],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=300,
                 start_new_session=True,
             )
             reply = result.stdout.strip()
