@@ -21,7 +21,8 @@
 | Phase 10: 工具调用折叠优化 v1.4 | ✅ 已完成 | main |
 | Phase 11: 自修改事故修复 + 日志 + Session 重命名 | ✅ 已完成 | main |
 | Phase 12: 优雅降级 — Gateway 重启不中断任务 | ✅ 已完成 | main |
-| Phase 13: 工具调用折叠优化 — 前置文本一起折叠 | ✅ 已完成 | main |
+| Phase 13.1: Bug 修复 — Session 重命名后发消息被恢复 | ✅ 已完成 | main |
+| Phase 14: 功能模块 v2.0 — 配置/记忆/Skill | 🔜 进行中 | main |
 
 ---
 
@@ -309,6 +310,29 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 
 ### 改动文件
 - `gateway.py` — rename 和 get_sessions 逻辑
+
+---
+
+## Phase 14: 功能模块 v2.0 — 配置/记忆/Skill
+
+### 开发计划
+
+三个新功能模块，按以下顺序实现：
+
+#### 功能 1：配置模块 (⚙️ 配置)
+- 🔜 **T14.1** 后端 API: `GET /api/config` + `PUT /api/config`（gateway.py）
+- **T14.2** 前端 ConfigPage：分区展示 + JSON 编辑器 + 保存
+- **T14.3** 测试 + 提交
+
+#### 功能 2：记忆模块 (🧠 记忆)
+- **T14.4** 后端 API: `GET /api/memory/files` + `GET /api/memory/files/:name`
+- **T14.5** 前端 MemoryPage：左侧文件列表 + 右侧 Markdown 内容
+- **T14.6** 测试 + 提交
+
+#### 功能 3：Skill 管理模块 (🔧 Skill)
+- **T14.7** 后端 API: Skills 列表、详情、目录树、文件查看
+- **T14.8** 前端 SkillsPage：左侧 Skill 列表 + 右侧详情 + 目录树 + 文件查看
+- **T14.9** 测试 + 提交
 
 ---
 

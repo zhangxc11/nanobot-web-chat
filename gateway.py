@@ -30,9 +30,24 @@ for i, arg in enumerate(sys.argv):
         WORKER_URL = sys.argv[i + 1]
 
 SESSIONS_DIR = os.path.expanduser('~/.nanobot/workspace/sessions')
+MEMORY_DIR = os.path.expanduser('~/.nanobot/workspace/memory')
+CONFIG_FILE = os.path.expanduser('~/.nanobot/config.json')
+USER_SKILLS_DIR = os.path.expanduser('~/.nanobot/workspace/skills')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(SCRIPT_DIR, 'frontend', 'dist')
 LOG_FILE = '/tmp/nanobot-gateway.log'
+
+# Find builtin skills directory
+BUILTIN_SKILLS_DIR = None
+try:
+    import importlib.util
+    spec = importlib.util.find_spec('nanobot')
+    if spec and spec.origin:
+        BUILTIN_SKILLS_DIR = os.path.join(os.path.dirname(spec.origin), 'skills')
+        if not os.path.isdir(BUILTIN_SKILLS_DIR):
+            BUILTIN_SKILLS_DIR = None
+except Exception:
+    pass
 
 # ── Logging setup ──
 logger = logging.getLogger('gateway')
@@ -62,7 +77,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', len(body))
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
         self.wfile.write(body)
@@ -71,7 +86,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         """Handle CORS preflight requests."""
         self.send_response(204)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
@@ -112,6 +127,27 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_sessions(params)
             return
 
+        if path == '/api/config':
+            self._handle_get_config()
+            return
+
+        if path == '/api/memory/files':
+            self._handle_get_memory_files()
+            return
+
+        if path.startswith('/api/memory/files/'):
+            filename = path[len('/api/memory/files/'):]
+            self._handle_get_memory_file(filename)
+            return
+
+        if path == '/api/skills':
+            self._handle_get_skills()
+            return
+
+        if path.startswith('/api/skills/'):
+            self._handle_skill_routes(path)
+            return
+
         route_params = self._match_route(path, '/api/sessions/:id/messages')
         if route_params:
             self._handle_get_messages(route_params['id'], params)
@@ -140,6 +176,17 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         route_params = self._match_route(path, '/api/sessions/:id/messages')
         if route_params:
             self._handle_send_message(route_params['id'])
+            return
+
+        self._send_json({'error': 'Not found'}, 404)
+
+    # ── PUT routes ──
+
+    def do_PUT(self):
+        path, params = self._parse_path()
+
+        if path == '/api/config':
+            self._handle_put_config()
             return
 
         self._send_json({'error': 'Not found'}, 404)
@@ -395,6 +442,297 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         if len(parts) == 2:
             return f'{parts[0]}:{parts[1]}'
         return f'cli:{session_id}'
+
+    # ── Config API handlers ──
+
+    def _handle_get_config(self):
+        """GET /api/config — read config.json."""
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            self._send_json(config)
+        except FileNotFoundError:
+            self._send_json({'error': 'Config file not found'}, 404)
+        except json.JSONDecodeError as e:
+            self._send_json({'error': f'Invalid JSON: {e}'}, 500)
+        except Exception as e:
+            logger.error(f"Failed to read config: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_put_config(self):
+        """PUT /api/config — write config.json."""
+        try:
+            data = self._read_body()
+            if not isinstance(data, dict):
+                self._send_json({'error': 'Invalid config: expected JSON object'}, 400)
+                return
+
+            # Write with pretty formatting
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.write('\n')
+
+            logger.info("Config updated successfully")
+            self._send_json({'success': True, 'message': 'Config saved'})
+        except Exception as e:
+            logger.error(f"Failed to write config: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    # ── Memory API handlers ──
+
+    def _handle_get_memory_files(self):
+        """GET /api/memory/files — list memory directory files."""
+        try:
+            if not os.path.isdir(MEMORY_DIR):
+                self._send_json({'files': []})
+                return
+
+            files = []
+            for name in sorted(os.listdir(MEMORY_DIR)):
+                filepath = os.path.join(MEMORY_DIR, name)
+                if os.path.isfile(filepath) and not name.startswith('.'):
+                    stat = os.stat(filepath)
+                    from datetime import datetime
+                    files.append({
+                        'name': name,
+                        'size': stat.st_size,
+                        'modifiedAt': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    })
+
+            self._send_json({'files': files})
+        except Exception as e:
+            logger.error(f"Failed to list memory files: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_get_memory_file(self, filename):
+        """GET /api/memory/files/:filename — read a memory file."""
+        # Security: prevent path traversal
+        if '/' in filename or '..' in filename:
+            self._send_json({'error': 'Invalid filename'}, 400)
+            return
+
+        filepath = os.path.join(MEMORY_DIR, filename)
+        if not os.path.isfile(filepath):
+            self._send_json({'error': 'File not found'}, 404)
+            return
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+            stat = os.stat(filepath)
+            from datetime import datetime
+            self._send_json({
+                'name': filename,
+                'content': content,
+                'size': stat.st_size,
+                'modifiedAt': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+        except Exception as e:
+            logger.error(f"Failed to read memory file {filename}: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    # ── Skills API handlers ──
+
+    def _handle_get_skills(self):
+        """GET /api/skills — list all skills (user + builtin)."""
+        skills = []
+
+        # User skills
+        if os.path.isdir(USER_SKILLS_DIR):
+            for name in sorted(os.listdir(USER_SKILLS_DIR)):
+                skill_dir = os.path.join(USER_SKILLS_DIR, name)
+                if os.path.isdir(skill_dir) and not name.startswith('.'):
+                    skill_md = os.path.join(skill_dir, 'SKILL.md')
+                    desc = ''
+                    if os.path.isfile(skill_md):
+                        desc = self._parse_skill_description(skill_md)
+                    skills.append({
+                        'name': name,
+                        'description': desc,
+                        'location': skill_dir,
+                        'source': 'user',
+                        'available': True,
+                    })
+
+        # Builtin skills
+        if BUILTIN_SKILLS_DIR and os.path.isdir(BUILTIN_SKILLS_DIR):
+            for name in sorted(os.listdir(BUILTIN_SKILLS_DIR)):
+                skill_dir = os.path.join(BUILTIN_SKILLS_DIR, name)
+                if os.path.isdir(skill_dir) and not name.startswith('.') and name != '__pycache__':
+                    # Skip if already in user skills (user overrides builtin)
+                    if any(s['name'] == name for s in skills):
+                        continue
+                    skill_md = os.path.join(skill_dir, 'SKILL.md')
+                    desc = ''
+                    if os.path.isfile(skill_md):
+                        desc = self._parse_skill_description(skill_md)
+                    skills.append({
+                        'name': name,
+                        'description': desc,
+                        'location': skill_dir,
+                        'source': 'builtin',
+                        'available': True,
+                    })
+
+        self._send_json({'skills': skills})
+
+    def _parse_skill_description(self, skill_md_path):
+        """Parse description from SKILL.md YAML frontmatter."""
+        try:
+            with open(skill_md_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            # Parse YAML frontmatter between --- markers
+            if content.startswith('---'):
+                end = content.find('---', 3)
+                if end != -1:
+                    frontmatter = content[3:end]
+                    for line in frontmatter.split('\n'):
+                        line = line.strip()
+                        if line.startswith('description:'):
+                            return line[len('description:'):].strip().strip('"').strip("'")
+            return ''
+        except Exception:
+            return ''
+
+    def _handle_skill_routes(self, path):
+        """Route /api/skills/:name/... requests."""
+        # Remove /api/skills/ prefix
+        rest = path[len('/api/skills/'):]
+        parts = rest.split('/', 1)
+        skill_name = parts[0]
+
+        if len(parts) == 1:
+            # GET /api/skills/:name — skill detail
+            self._handle_get_skill_detail(skill_name)
+            return
+
+        sub_path = parts[1]
+        if sub_path == 'tree':
+            # GET /api/skills/:name/tree
+            self._handle_get_skill_tree(skill_name)
+            return
+
+        if sub_path.startswith('files/'):
+            # GET /api/skills/:name/files/... 
+            file_path = sub_path[len('files/'):]
+            self._handle_get_skill_file(skill_name, file_path)
+            return
+
+        self._send_json({'error': 'Not found'}, 404)
+
+    def _find_skill_dir(self, skill_name):
+        """Find skill directory (user skills first, then builtin)."""
+        if '/' in skill_name or '..' in skill_name:
+            return None
+        # User skills first
+        user_dir = os.path.join(USER_SKILLS_DIR, skill_name)
+        if os.path.isdir(user_dir):
+            return user_dir
+        # Builtin skills
+        if BUILTIN_SKILLS_DIR:
+            builtin_dir = os.path.join(BUILTIN_SKILLS_DIR, skill_name)
+            if os.path.isdir(builtin_dir):
+                return builtin_dir
+        return None
+
+    def _handle_get_skill_detail(self, skill_name):
+        """GET /api/skills/:name — read SKILL.md content."""
+        skill_dir = self._find_skill_dir(skill_name)
+        if not skill_dir:
+            self._send_json({'error': 'Skill not found'}, 404)
+            return
+
+        skill_md = os.path.join(skill_dir, 'SKILL.md')
+        content = ''
+        if os.path.isfile(skill_md):
+            try:
+                with open(skill_md, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except Exception as e:
+                logger.error(f"Failed to read SKILL.md for {skill_name}: {e}")
+
+        source = 'user' if skill_dir.startswith(USER_SKILLS_DIR) else 'builtin'
+        self._send_json({
+            'name': skill_name,
+            'content': content,
+            'location': skill_dir,
+            'source': source,
+        })
+
+    def _handle_get_skill_tree(self, skill_name):
+        """GET /api/skills/:name/tree — directory tree."""
+        skill_dir = self._find_skill_dir(skill_name)
+        if not skill_dir:
+            self._send_json({'error': 'Skill not found'}, 404)
+            return
+
+        tree = []
+        for root, dirs, files in os.walk(skill_dir):
+            # Skip hidden dirs and __pycache__
+            dirs[:] = [d for d in sorted(dirs) if not d.startswith('.') and d != '__pycache__']
+            rel_root = os.path.relpath(root, skill_dir)
+
+            if rel_root != '.':
+                tree.append({'path': rel_root, 'type': 'dir'})
+
+            for fname in sorted(files):
+                if fname.startswith('.'):
+                    continue
+                rel_path = os.path.join(rel_root, fname) if rel_root != '.' else fname
+                fpath = os.path.join(root, fname)
+                try:
+                    size = os.path.getsize(fpath)
+                except OSError:
+                    size = 0
+                tree.append({'path': rel_path, 'type': 'file', 'size': size})
+
+        self._send_json({'name': skill_name, 'tree': tree})
+
+    def _handle_get_skill_file(self, skill_name, file_path):
+        """GET /api/skills/:name/files/:path — read a file in skill directory."""
+        skill_dir = self._find_skill_dir(skill_name)
+        if not skill_dir:
+            self._send_json({'error': 'Skill not found'}, 404)
+            return
+
+        # Security: prevent path traversal
+        if '..' in file_path:
+            self._send_json({'error': 'Invalid path'}, 400)
+            return
+
+        full_path = os.path.join(skill_dir, file_path)
+        real_path = os.path.realpath(full_path)
+        real_skill = os.path.realpath(skill_dir)
+        if not real_path.startswith(real_skill):
+            self._send_json({'error': 'Forbidden'}, 403)
+            return
+
+        if not os.path.isfile(full_path):
+            self._send_json({'error': 'File not found'}, 404)
+            return
+
+        try:
+            # Try reading as text; if it fails, report as binary
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self._send_json({
+                'path': file_path,
+                'content': content,
+                'size': os.path.getsize(full_path),
+                'binary': False,
+            })
+        except UnicodeDecodeError:
+            self._send_json({
+                'path': file_path,
+                'content': '(binary file)',
+                'size': os.path.getsize(full_path),
+                'binary': True,
+            })
+        except Exception as e:
+            logger.error(f"Failed to read skill file {skill_name}/{file_path}: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    # ── Task Status handler ──
 
     def _handle_get_task_status(self, session_id):
         """GET /api/sessions/:id/task-status — query background task status from worker."""

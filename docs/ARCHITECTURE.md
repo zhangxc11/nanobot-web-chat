@@ -783,4 +783,127 @@ Gateway 重启时的降级流程：
 
 ---
 
+## 十一、功能模块 API 设计 (v2.0)
+
+### 11.1 配置模块 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/config` | 读取 config.json，返回完整 JSON |
+| PUT | `/api/config` | 接收完整 JSON，写入 config.json |
+
+**安全性**：API Key 等敏感字段由前端负责 mask 显示，后端原样返回/保存。
+
+### 11.2 记忆模块 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/memory/files` | 列出 memory 目录下所有文件 |
+| GET | `/api/memory/files/:filename` | 读取指定文件内容（纯文本） |
+
+**响应格式**：
+```json
+// GET /api/memory/files
+{
+  "files": [
+    { "name": "MEMORY.md", "size": 6924, "modifiedAt": "2026-02-26T00:43:00" },
+    { "name": "HISTORY.md", "size": 7667, "modifiedAt": "2026-02-26T00:10:00" }
+  ]
+}
+
+// GET /api/memory/files/MEMORY.md
+{
+  "name": "MEMORY.md",
+  "content": "# Long-term Memory\n\n...",
+  "size": 6924,
+  "modifiedAt": "2026-02-26T00:43:00"
+}
+```
+
+### 11.3 Skill 管理模块 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/skills` | 列出所有 Skills（用户自定义 + 内置） |
+| GET | `/api/skills/:name` | 获取 Skill 详情（SKILL.md 内容） |
+| GET | `/api/skills/:name/tree` | 获取 Skill 目录树 |
+| GET | `/api/skills/:name/files/*path` | 读取 Skill 下指定文件内容 |
+
+**Skill 来源**：
+1. 用户自定义：`~/.nanobot/workspace/skills/`
+2. 内置：`nanobot` Python 包中的 `nanobot/skills/`（通过 `importlib` 定位）
+
+**响应格式**：
+```json
+// GET /api/skills
+{
+  "skills": [
+    {
+      "name": "calendar-reader",
+      "description": "Read-only query of macOS Calendar events...",
+      "location": "/Users/.../skills/calendar-reader/",
+      "source": "user",
+      "available": true
+    },
+    {
+      "name": "memory",
+      "description": "Two-layer memory system...",
+      "location": "/Users/.../nanobot/skills/memory/",
+      "source": "builtin",
+      "available": true
+    }
+  ]
+}
+
+// GET /api/skills/calendar-reader/tree
+{
+  "name": "calendar-reader",
+  "tree": [
+    { "path": "SKILL.md", "type": "file", "size": 1234 },
+    { "path": "scripts", "type": "dir" },
+    { "path": "scripts/query_events.sh", "type": "file", "size": 456 },
+    { "path": "scripts/query_events.swift", "type": "file", "size": 789 }
+  ]
+}
+
+// GET /api/skills/calendar-reader/files/SKILL.md
+{
+  "path": "SKILL.md",
+  "content": "---\nname: calendar-reader\n...",
+  "size": 1234
+}
+```
+
+### 11.4 前端组件架构
+
+```
+App
+├── TabBar
+└── ContentArea
+    ├── [chat]    → ChatPage (已有)
+    ├── [config]  → ConfigPage (新)
+    │   └── ConfigEditor
+    │       ├── ConfigSection (agents)
+    │       ├── ConfigSection (providers) — 可折叠
+    │       ├── ConfigSection (channels) — 可折叠
+    │       ├── ConfigSection (gateway)
+    │       ├── ConfigSection (tools)
+    │       └── SaveButton
+    ├── [memory]  → MemoryPage (新)
+    │   ├── MemorySidebar
+    │   │   └── FileItem × N
+    │   └── MemoryContent
+    │       └── MarkdownRenderer
+    └── [skills]  → SkillsPage (新)
+        ├── SkillSidebar
+        │   └── SkillItem × N
+        └── SkillContent
+            ├── SkillDescription (SKILL.md)
+            ├── FileTree
+            │   └── TreeNode × N
+            └── FileViewer
+```
+
+---
+
 *本文档将随开发进展持续更新。*

@@ -1,0 +1,275 @@
+.container {
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.loading, .error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  gap: 12px;
+}
+
+.error button {
+  padding: 6px 16px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.saveMessage {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.saveButton {
+  padding: 8px 20px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.saveButton:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.saveButton.dirty {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.saveButton.dirty:hover {
+  background: var(--accent-hover);
+}
+
+.saveButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sections {
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 40px;
+}
+
+.section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+
+.sectionIcon {
+  font-size: 16px;
+}
+
+.sectionTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sectionBody {
+  padding: 16px 20px;
+}
+
+/* Field rows */
+.objectEntries {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.fieldLabel {
+  min-width: 180px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.fieldValue {
+  flex: 1;
+  min-width: 0;
+}
+
+.input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.input[type="number"] {
+  width: 120px;
+}
+
+/* Password field */
+.passwordField {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.passwordField .input {
+  flex: 1;
+}
+
+.eyeButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.eyeButton:hover {
+  opacity: 1;
+}
+
+/* Toggle switch */
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.toggle input {
+  display: none;
+}
+
+.toggleSlider {
+  width: 36px;
+  height: 20px;
+  background: var(--border-light);
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s;
+}
+
+.toggleSlider::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  background: var(--text-primary);
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+}
+
+.toggle input:checked + .toggleSlider {
+  background: var(--accent);
+}
+
+.toggle input:checked + .toggleSlider::after {
+  transform: translateX(16px);
+}
+
+.toggleLabel {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+/* Nested sections */
+.nestedSection {
+  margin: 2px 0;
+}
+
+.nestedHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nestedHeader:hover {
+  color: var(--accent);
+}
+
+.collapseIcon {
+  font-size: 11px;
+  color: var(--text-muted);
+  width: 14px;
+}
+
+.nestedKey {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.nestedBody {
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
+  margin-left: 6px;
+}
