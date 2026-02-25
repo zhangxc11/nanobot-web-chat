@@ -274,14 +274,16 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         from datetime import datetime
         timestamp = int(datetime.now().timestamp())
         session_id = f'webchat_{timestamp}'
+        session_key = f'webchat:{timestamp}'
 
-        # Create an empty session file (nanobot will populate metadata on first message)
+        # Create an empty session file
+        # nanobot uses key.replace(':', '_') + '.jsonl' for file naming
         filepath = os.path.join(SESSIONS_DIR, session_id + '.jsonl')
         os.makedirs(SESSIONS_DIR, exist_ok=True)
         with open(filepath, 'w', encoding='utf-8') as f:
             meta = {
                 '_type': 'metadata',
-                'key': f'cli:{session_id}',
+                'key': session_key,
                 'created_at': datetime.now().isoformat(),
                 'updated_at': datetime.now().isoformat(),
                 'metadata': {},
@@ -296,6 +298,30 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             'messageCount': 0,
         })
 
+    def _get_session_key(self, session_id):
+        """Read the session key from the JSONL metadata line.
+        File naming convention: key.replace(':', '_') + '.jsonl'
+        But we read the actual key from the metadata to be safe.
+        """
+        filepath = os.path.join(SESSIONS_DIR, session_id + '.jsonl')
+        if os.path.exists(filepath):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        if obj.get('_type') == 'metadata' and 'key' in obj:
+                            return obj['key']
+                    except json.JSONDecodeError:
+                        continue
+        # Fallback: reconstruct key by replacing first '_' with ':'
+        parts = session_id.split('_', 1)
+        if len(parts) == 2:
+            return f'{parts[0]}:{parts[1]}'
+        return f'cli:{session_id}'
+
     def _handle_send_message(self, session_id):
         """POST /api/sessions/:id/messages — send message via nanobot CLI."""
         # Validate session_id
@@ -309,10 +335,13 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'error': 'Empty message'}, 400)
             return
 
+        # Get the correct session key from metadata
+        session_key = self._get_session_key(session_id)
+
         try:
             # Call nanobot CLI with the session key
             result = subprocess.run(
-                ['nanobot', 'agent', '-m', message, '--no-markdown', '-s', f'cli:{session_id}'],
+                ['nanobot', 'agent', '-m', message, '--no-markdown', '-s', session_key],
                 capture_output=True,
                 text=True,
                 timeout=120,
