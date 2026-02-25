@@ -1,0 +1,64 @@
+/* Global styles for nanobot Web Chat */
+
+:root {
+  --bg-primary: #1a1a2e;
+  --bg-secondary: #16213e;
+  --bg-tertiary: #0f3460;
+  --bg-hover: #1a3a5c;
+  --text-primary: #e8e8e8;
+  --text-secondary: #a0a0b0;
+  --text-muted: #6c6c7c;
+  --accent: #4fc3f7;
+  --accent-hover: #29b6f6;
+  --border: #2a2a4a;
+  --border-light: #3a3a5a;
+  --success: #66bb6a;
+  --error: #ef5350;
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 0px;
+  --tabbar-height: 48px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Ant Design dark theme overrides */
+.ant-tabs {
+  color: var(--text-primary) !important;
+}
