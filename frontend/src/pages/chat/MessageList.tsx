@@ -4,11 +4,11 @@ import { useSessionStore } from '@/store/sessionStore';
 import MessageItem, { groupMessages, AssistantTurnGroup } from './MessageItem';
 import styles from './MessageList.module.css';
 
-function ProgressIndicator({ steps }: { steps: string[] }) {
+function ProgressIndicator({ steps, recovering }: { steps: string[]; recovering: boolean }) {
   return (
     <div className={`${styles.message} ${styles.assistantMessage}`}>
       <div className={styles.progressBubble}>
-        {steps.length === 0 ? (
+        {steps.length === 0 && !recovering ? (
           <div className={styles.typingBubble}>
             <span className={styles.dot} />
             <span className={styles.dot} />
@@ -22,11 +22,18 @@ function ProgressIndicator({ steps }: { steps: string[] }) {
                 <span className={styles.progressText}>{step}</span>
               </div>
             ))}
-            <div className={styles.typingBubble}>
-              <span className={styles.dot} />
-              <span className={styles.dot} />
-              <span className={styles.dot} />
-            </div>
+            {recovering ? (
+              <div className={styles.progressStep}>
+                <span className={styles.progressArrow}>⏳</span>
+                <span className={styles.progressText}>连接中断，正在恢复任务状态...</span>
+              </div>
+            ) : (
+              <div className={styles.typingBubble}>
+                <span className={styles.dot} />
+                <span className={styles.dot} />
+                <span className={styles.dot} />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -35,7 +42,7 @@ function ProgressIndicator({ steps }: { steps: string[] }) {
 }
 
 export default function MessageList() {
-  const { messages, loading, hasMore, sending, error, progressSteps } = useMessageStore();
+  const { messages, loading, hasMore, sending, error, progressSteps, recovering } = useMessageStore();
   const { activeSessionId } = useSessionStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -172,7 +179,7 @@ export default function MessageList() {
           // assistant-turn: render compactly
           return <AssistantTurnGroup key={`turn-${idx}`} messages={group.messages} />;
         })}
-        {sending && <ProgressIndicator steps={progressSteps} />}
+        {sending && <ProgressIndicator steps={progressSteps} recovering={recovering} />}
         {error && messages.length > 0 && (
           <div className={styles.errorBanner}>
             ⚠️ {error}

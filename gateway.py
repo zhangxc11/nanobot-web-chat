@@ -117,6 +117,11 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_messages(route_params['id'], params)
             return
 
+        route_params = self._match_route(path, '/api/sessions/:id/task-status')
+        if route_params:
+            self._handle_get_task_status(route_params['id'])
+            return
+
         if path.startswith('/api/'):
             self._send_json({'error': 'Not found'}, 404)
             return
@@ -386,6 +391,25 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         if len(parts) == 2:
             return f'{parts[0]}:{parts[1]}'
         return f'cli:{session_id}'
+
+    def _handle_get_task_status(self, session_id):
+        """GET /api/sessions/:id/task-status — query background task status from worker."""
+        session_key = self._get_session_key(session_id)
+        encoded_key = urllib.parse.quote(session_key, safe='')
+        try:
+            req = urllib.request.Request(
+                f'{WORKER_URL}/tasks/{encoded_key}',
+                method='GET',
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            self._send_json(data)
+        except urllib.error.URLError as e:
+            logger.error(f"Worker unavailable for task status: {e.reason}")
+            self._send_json({'status': 'unknown', 'message': 'Worker unavailable'}, 502)
+        except Exception as e:
+            logger.error(f"Task status error: {e}")
+            self._send_json({'status': 'unknown', 'message': str(e)}, 500)
 
     def _handle_send_message(self, session_id):
         """POST /api/sessions/:id/messages — forward to Worker as SSE stream."""

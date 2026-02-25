@@ -60,6 +60,24 @@ export async function sendMessage(
   return res.json();
 }
 
+// ── Task Status (graceful degradation) ──
+
+export interface TaskStatus {
+  status: 'running' | 'done' | 'error' | 'unknown';
+  pid?: number;
+  started_at?: string;
+  finished_at?: string;
+  progress_count?: number;
+  error?: string;
+  message?: string;
+}
+
+export async function fetchTaskStatus(sessionId: string): Promise<TaskStatus> {
+  const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/task-status`);
+  if (!res.ok) return { status: 'unknown', message: `HTTP ${res.status}` };
+  return res.json();
+}
+
 // ── SSE Streaming ──
 
 export interface StreamCallbacks {

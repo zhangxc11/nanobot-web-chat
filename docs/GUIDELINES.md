@@ -6,14 +6,14 @@
 
 ## 1. 自修改安全规则 ⚠️
 
-### 1.1 绝不在任务执行中重启服务
+### 1.1 优雅降级保护 (v1.5)
 
-当 nanobot 通过 Web Chat UI 接收任务时，**绝不能**在同一任务中重启 gateway 或 worker。
+从 v1.5 开始，系统支持优雅降级：即使 gateway 重启导致 SSE 断开，Worker 中的 nanobot 子进程会继续在后台执行，前端会自动轮询恢复。
 
-**原因**：重启 gateway 会断开正在进行的 SSE 连接，导致：
-- 前端报 "TypeError: Failed to fetch"
-- 用户看到任务失败
-- 代码可能处于未提交的中间状态
+**但仍然建议**：
+- 尽量避免在 Web UI 任务中修改 gateway.py
+- 如果必须修改，nanobot 不应主动重启 gateway — 告知用户手动重启
+- 重启 gateway 后前端会自动恢复任务状态
 
 ### 1.2 修改不同文件的处理方式
 
