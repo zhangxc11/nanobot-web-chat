@@ -5,7 +5,7 @@ import ChatInput from './ChatInput';
 import styles from './ChatPage.module.css';
 
 export default function ChatPage() {
-  const { sidebarCollapsed } = useUIStore();
+  const { sidebarCollapsed, toggleSidebar } = useUIStore();
 
   return (
     <div className={styles.chatPage}>
@@ -13,6 +13,15 @@ export default function ChatPage() {
         <Sidebar />
       </div>
       <div className={styles.chatArea}>
+        {sidebarCollapsed && (
+          <button
+            className={styles.expandButton}
+            onClick={toggleSidebar}
+            title="展开侧边栏"
+          >
+            ☰
+          </button>
+        )}
         <MessageList />
         <ChatInput />
       </div>
