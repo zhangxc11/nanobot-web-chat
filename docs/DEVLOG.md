@@ -14,6 +14,7 @@
 | Phase 3: 交互完善 | ✅ 已完成 | merged to develop |
 | Phase 4: Markdown & 代码高亮 | ✅ 已完成 | merged to develop |
 | Phase 5: 完善 & 部署 | ✅ 已完成 | merged to main |
+| Phase 6: 迭代优化 v1.1 | 🔄 进行中 | feat/v1.1-polish |
 
 ---
 
@@ -70,6 +71,19 @@
 - ✅ **T5.2** 错误处理 & 边界情况（网络错误提示、重试按钮、空状态优化）
 - ✅ **T5.3** 端到端测试通过（health, sessions, create, static, SPA fallback）
 - 🔜 **T5.4** merge to develop → main，发布
+
+---
+
+## Phase 6: 迭代优化 v1.1（用户反馈修复）
+
+- 🔜 **T6.1** 工具调用消息紧凑化：合并 assistant+tool_calls 和 tool result 为单行显示
+- ⏳ **T6.2** Sidebar 折叠后添加展开按钮
+- ⏳ **T6.3** 集成测试 & merge
+
+### Issue 说明
+- **Issue #1**: 工具调用占据过多篇幅 → T6.1
+- **Issue #2**: 旧 UI session 缺少助手回复 → 已知旧 UI bug，无需修复
+- **Issue #3**: Sidebar 折叠后无法展开 → T6.2
 
 ---
 

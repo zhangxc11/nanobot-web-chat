@@ -268,6 +268,31 @@ interface UIStore {
 }
 ```
 
+### 2.4 工具调用消息的渲染策略 (v1.1 更新)
+
+nanobot 的消息流中，工具调用产生多条 JSONL 记录：
+1. `assistant` 消息（含 `tool_calls` 数组，`content` 通常为空）
+2. `tool` 消息（工具执行结果，含 `tool_call_id` 和 `name`）
+3. 可能有多轮连续的 1→2
+4. 最后一条 `assistant` 消息（含 `content`，是最终回复）
+
+**渲染策略**：
+- **无内容的 assistant+tool_calls**：不单独渲染，而是与后续 tool result 合并
+- **tool 消息**：紧凑单行显示 `↳ 工具名 → 结果摘要`，可点击展开详情
+- **有内容的 assistant 消息**：正常渲染为 Markdown 气泡
+- **连续工具调用**：在 assistant 气泡内按序显示所有工具调用行
+
+```
+// 渲染示例：
+┌─────────────────────────────────────────────┐
+│ 🤖 让我检查一下当前状态：                      │
+│   ↳ exec → On branch main, nothing to...   │  ← 可点击展开
+│   ↳ read_file → Successfully read 2050...   │  ← 可点击展开
+│                                             │
+│ 好的，代码已经在 main 分支上，状态正常。        │
+└─────────────────────────────────────────────┘
+```
+
 ---
 
 ## 三、后端 API 设计
