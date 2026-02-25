@@ -1,0 +1,143 @@
+/* ── Message List ── */
+
+.messageList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 24px;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  gap: 12px;
+}
+
+.emptyIcon {
+  font-size: 48px;
+}
+
+.emptyState p {
+  font-size: 14px;
+}
+
+.loadMore {
+  text-align: center;
+  padding: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.loadMore:hover {
+  color: var(--accent);
+}
+
+/* ── Message Bubbles ── */
+
+.message {
+  display: flex;
+  max-width: 85%;
+}
+
+.userMessage {
+  align-self: flex-end;
+  margin-left: auto;
+}
+
+.assistantMessage {
+  align-self: flex-start;
+  margin-right: auto;
+}
+
+.bubble {
+  padding: 10px 14px;
+  border-radius: 12px;
+  line-height: 1.6;
+  font-size: 14px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.userMessage .bubble {
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.assistantMessage .bubble {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-bottom-left-radius: 4px;
+}
+
+.content {
+  /* preserve whitespace and newlines */
+}
+
+.timestamp {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-top: 4px;
+  text-align: right;
+}
+
+/* ── Tool Messages ── */
+
+.toolMessage {
+  align-self: flex-start;
+  max-width: 90%;
+  font-size: 12px;
+}
+
+.toolDetails {
+  color: var(--text-muted);
+}
+
+.toolSummary {
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.toolSummary:hover {
+  background: var(--bg-hover);
+}
+
+.toolContent {
+  margin: 4px 0 0;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  font-size: 12px;
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Tool Call Badge ── */
+
+.toolCallInfo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.toolCallBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}

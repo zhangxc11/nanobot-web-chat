@@ -1,5 +1,7 @@
 import { useUIStore } from '@/store/uiStore';
 import Sidebar from './Sidebar/Sidebar';
+import MessageList from './MessageList';
+import ChatInput from './ChatInput';
 import styles from './ChatPage.module.css';
 
 export default function ChatPage() {
@@ -12,24 +14,9 @@ export default function ChatPage() {
       </div>
       <div className={styles.chatArea}>
         <div className={styles.messages}>
-          <div className={styles.emptyState}>
-            <span className={styles.emptyIcon}>💬</span>
-            <p>选择一个对话或创建新对话开始聊天</p>
-          </div>
+          <MessageList />
         </div>
-        <div className={styles.inputArea}>
-          <div className={styles.inputWrapper}>
-            <textarea
-              className={styles.input}
-              placeholder="输入消息..."
-              rows={1}
-              disabled
-            />
-            <button className={styles.sendButton} disabled>
-              发送
-            </button>
-          </div>
-        </div>
+        <ChatInput />
       </div>
     </div>
   );
