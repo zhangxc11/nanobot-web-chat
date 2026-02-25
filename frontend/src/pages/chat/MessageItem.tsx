@@ -51,11 +51,11 @@ function ToolCallLine({ name, content }: { name: string; content: string }) {
   );
 }
 
-/** A preceding text line inside the collapsible area */
+/** A preceding text line inside the collapsible area — rendered as Markdown */
 function PrecedingText({ content }: { content: string }) {
   return (
     <div className={styles.precedingText}>
-      {content}
+      <MarkdownRenderer content={content} />
     </div>
   );
 }
