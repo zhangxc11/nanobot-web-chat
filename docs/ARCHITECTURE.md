@@ -503,31 +503,41 @@ main          ← 稳定版本
    - 本文件记录当前进展、下一步计划
    - 任何设计变更同步更新
 
-### 7.2 当前进展 & 下一步
+### 7.2 工具调用轮次约束
 
-**当前状态**：Phase 1 进行中 — 基础布局实现
+由于 AI 工具调用轮次有限，每次 session 只聚焦完成 **1 个小任务**（约 10-15 次工具调用）。
 
-**已完成**：
-- 项目脚手架（Vite + React + TS）
-- 依赖安装（antd, zustand, react-markdown 等）
-- 类型定义、Store 骨架、API service 骨架
-- 目录结构
+**每次 session 的标准流程：**
+1. 读取 `DEVLOG.md` → 找到当前待做任务（标记 `🔜`）
+2. 执行该任务（编码 + 测试）
+3. `git commit`
+4. 更新 `DEVLOG.md`（标记完成 ✅，标记下一个 🔜）
+5. 如果是阶段最后一个任务，merge 到 develop
 
-**下一步**：
-- 实现 App.tsx 根组件（TabBar + 模块切换）
-- 实现各页面组件
-- 全局暗色主题
-- Vite proxy 配置
-- 验证前端可运行
+### 7.3 不破坏现有服务原则
 
-### 7.3 断点恢复指南
+⚠️ **现有 `server.py` + `index.html` 是正在使用的 Web 服务，在新前端完全可用之前不得修改。**
+
+**策略：**
+- 新后端代码写在 `server_v2.py`，独立运行在不同端口（如 8081）
+- 新前端 Vite dev server 通过 proxy 指向 `server_v2.py`
+- 全部功能验证通过后，最终合并替换
+
+### 7.4 当前进展 & 下一步
+
+**当前状态**：Phase 1 ✅ 已完成，Phase 2 进行中
+
+**当前分支**：`feat/phase2-session-api`（从 develop 切出）
+
+**下一步任务**：见 `DEVLOG.md` 中标记 🔜 的任务
+
+### 7.5 断点恢复指南
 
 如果 session 丢失，新 session 应：
-1. 阅读 `docs/ARCHITECTURE.md` — 了解架构设计
-2. 阅读 `docs/DEVLOG.md` — 了解开发进展和下一步
-3. 阅读 `docs/REQUIREMENTS.md` — 了解需求
-4. 查看 `git log` — 了解代码变更历史
-5. 从 DEVLOG.md 中最后一个未完成的任务继续
+1. 阅读 `docs/DEVLOG.md` → 找到 🔜 标记的任务，直接继续
+2. 如需更多上下文，阅读 `docs/ARCHITECTURE.md`
+3. `git log --oneline -10` 查看最近提交
+4. `git branch` 确认当前分支
 
 ---
 

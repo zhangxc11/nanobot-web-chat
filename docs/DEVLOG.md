@@ -1,71 +1,143 @@
 # nanobot Web Chat — 开发工作日志
 
-> 本文件记录完整的开发过程，确保即使 Web UI session 丢失，也能恢复上下文继续开发。
+> 本文件是开发过程的唯一真相源。每次新 session 从这里恢复上下文。
+> 找到 🔜 标记的任务，直接继续执行。
 
 ---
 
 ## 项目状态总览
 
-| 阶段 | 状态 | 说明 |
+| 阶段 | 状态 | 分支 |
 |------|------|------|
 | Phase 1: 脚手架 & 基础布局 | ✅ 已完成 | merged to develop |
-| Phase 2: 对话模块 — Session 管理 + 后端 API | 🔄 待开始 | |
-| Phase 3: 对话模块 — 消息渲染 | ⏳ 待开始 | |
-| Phase 4: 完善 & 测试 | ⏳ 待开始 | |
+| Phase 2: 后端 API + Session 管理 | 🔄 进行中 | feat/phase2-session-api |
+| Phase 3: 消息发送与渲染 | ⏳ 待开始 | |
+| Phase 4: Markdown & 代码高亮 | ⏳ 待开始 | |
+| Phase 5: 完善 & 部署 | ⏳ 待开始 | |
 
 ---
 
-## 2026-02-25 — Phase 1 完成
+## ⚠️ 重要约束
 
-### Git 提交记录
-```
-66aa6a7 feat: Phase 1 - basic layout with TabBar, ChatPage skeleton, Sidebar, and placeholder pages
-edf91dc feat: add types, stores, api service layer, and dev docs
-b168df8 chore: add .gitignore, exclude reference and logs
-38fb613 chore: initial commit - existing web-chat code
-```
-
-### Phase 1 完成内容
-1. ✅ App.tsx 重写：TabBar + 模块切换（chat/config/memory/skills）
-2. ✅ TabBar 组件：顶部模块导航，暗色主题
-3. ✅ ChatPage 骨架：左侧 Sidebar + 右侧 ChatArea 布局，支持折叠
-4. ✅ Sidebar 骨架：新建按钮、Session 列表占位、折叠按钮
-5. ✅ 占位页面：ConfigPage, MemoryPage, SkillsPage (Coming Soon)
-6. ✅ 全局暗色主题 CSS 变量
-7. ✅ Vite proxy 配置 `/api` → `localhost:8080`
-8. ✅ TypeScript 路径别名 `@/` 配置
-9. ✅ 构建验证通过：`tsc --noEmit` OK, `vite build` OK
-
-### 当前分支状态
-- `main`: 初始代码
-- `develop`: Phase 1 已合并
-- `feat/phase1-layout`: Phase 1 完成（已合并到 develop）
+1. **不破坏现有服务**：`server.py` + `index.html` 是正在用的，不要修改。新后端写 `server_v2.py`，端口 8081。
+2. **每次 session 只做 1 个小任务**：找到 🔜，做完标 ✅，标下一个 🔜，commit。
+3. **Vite proxy 指向 server_v2.py (8081)**，不影响现有 server.py (8080)。
 
 ---
 
-## Phase 2 计划：对话模块 — Session 管理 + 后端 API
+## Phase 2: 后端 API + Session 管理（细粒度任务）
 
-### 后端改造任务
-- [ ] 2.1 重写 server.py：添加 RESTful API 路由
-  - GET `/api/sessions` — Session 列表（摘要、活跃时间、按时间倒序）
-  - POST `/api/sessions` — 创建新 Session
-  - GET `/api/sessions/:id/messages?limit=30&before=<ts>` — 分页消息
-  - POST `/api/sessions/:id/messages` — 发送消息（代理 nanobot CLI）
-- [ ] 2.2 Session 摘要生成逻辑（首条用户消息截取）
+### 后端任务
+
+- 🔜 **T2.1** 创建 `server_v2.py` 基础框架
+  - Python http.server，端口 8081
+  - 路由分发：`/api/sessions`, `/api/sessions/:id/messages`
+  - CORS 支持（允许 Vite dev server 5173 访问）
+  - 能启动、能返回 hello world
+  - 更新 Vite proxy 指向 8081
+
+- ⏳ **T2.2** 实现 `GET /api/sessions` — Session 列表
+  - 扫描 `~/.nanobot/workspace/sessions/*.jsonl`
+  - 读取每个文件的 metadata（created_at, updated_at）
+  - 生成摘要：第一条 user 消息的 content，去掉 `[Runtime Context]`，截取前 50 字符
+  - 统计消息数量
+  - 按 updated_at 倒序返回
+
+- ⏳ **T2.3** 实现 `GET /api/sessions/:id/messages` — 分页消息
+  - 参数：`limit`（默认 30）、`before`（时间戳，用于向前翻页）
+  - 读取 jsonl 文件，跳过 `_type: metadata` 行
+  - 返回 messages 数组 + hasMore 标记
+  - 为每条消息生成 id（行号或 hash）
+
+- ⏳ **T2.4** 实现 `POST /api/sessions/:id/messages` — 发送消息
+  - 接收 `{ "message": "..." }`
+  - 调用 `nanobot agent -m "<msg>" --no-markdown -s "webchat:<session_id>"`
+  - 返回 `{ "reply": "..." }`
+
+- ⏳ **T2.5** 实现 `POST /api/sessions` — 创建新 Session
+  - 生成 session id：`webchat_<timestamp>`
+  - 返回新 session 信息
 
 ### 前端任务
-- [ ] 2.3 Sidebar 接入真实 Session 数据
-  - SessionList 组件
-  - SessionItem 组件（显示摘要、时间）
-- [ ] 2.4 Session 切换：点击后加载消息
-- [ ] 2.5 新建 Session 功能
-- [ ] 2.6 ChatInput 组件：发送消息
-- [ ] 2.7 MessageList 基础渲染（先纯文本，Markdown 在 Phase 3）
 
-### 开发顺序
-1. 先改后端 API（前端依赖后端数据）
-2. 再接入前端组件
+- ⏳ **T2.6** 完善 `services/api.ts` — 对接真实 API
+  - fetchSessions()
+  - fetchMessages(sessionId, limit, before)
+  - sendMessage(sessionId, message)
+  - createSession()
+
+- ⏳ **T2.7** 完善 `store/sessionStore.ts` — 接入 API
+  - fetchSessions → 调 API → 更新 sessions 列表
+  - setActiveSession → 触发消息加载
+  - createSession → 调 API → 添加到列表
+
+- ⏳ **T2.8** 实现 `Sidebar/SessionList.tsx` + `SessionItem.tsx`
+  - 渲染 session 列表
+  - 显示摘要、时间
+  - 点击切换 activeSession
+  - 当前选中高亮
+
+- ⏳ **T2.9** 完善 `store/messageStore.ts` — 接入 API
+  - loadMessages → 调 API → 设置 messages
+  - loadMoreMessages → 分页加载
+  - clearMessages → 切换 session 时清空
+
+- ⏳ **T2.10** 实现 `ChatInput.tsx` — 消息输入发送
+  - textarea 自动增高
+  - Enter 发送（Shift+Enter 换行）
+  - 发送中禁用
+  - 调用 sendMessage
+
+- ⏳ **T2.11** 实现 `MessageList.tsx` + `MessageItem.tsx` — 基础消息渲染
+  - 纯文本渲染（Markdown 在 Phase 4）
+  - user / assistant 消息样式区分
+  - tool 消息暂时折叠隐藏
+  - 自动滚动到底部
+
+- ⏳ **T2.12** Phase 2 集成测试 & merge
+  - 启动 server_v2.py + Vite dev server
+  - 验证：session 列表加载、切换、消息展示、发送消息
+  - merge feat/phase2-session-api → develop
 
 ---
 
-*持续更新中...*
+## Phase 3: 消息发送与实时交互（细粒度任务）
+
+- ⏳ **T3.1** 消息发送的乐观更新（先显示用户消息，再等回复）
+- ⏳ **T3.2** "正在思考..." loading 动画
+- ⏳ **T3.3** 发送后自动刷新 session 列表排序
+- ⏳ **T3.4** 新建 Session 按钮功能
+- ⏳ **T3.5** 向上滚动加载更多历史消息（IntersectionObserver）
+- ⏳ **T3.6** Phase 3 集成测试 & merge
+
+---
+
+## Phase 4: Markdown 渲染 & 代码高亮（细粒度任务）
+
+- ⏳ **T4.1** MarkdownRenderer 组件（react-markdown + remark-gfm）
+- ⏳ **T4.2** CodeBlock 组件（highlight.js + 复制按钮）
+- ⏳ **T4.3** ToolCallMessage 折叠/展开组件
+- ⏳ **T4.4** 消息中的 tool_calls 关联渲染
+- ⏳ **T4.5** Phase 4 集成测试 & merge
+
+---
+
+## Phase 5: 完善 & 部署（细粒度任务）
+
+- ⏳ **T5.1** 生产构建：server_v2.py serve 前端 dist/
+- ⏳ **T5.2** 替换 server.py（确认新版完全可用后）
+- ⏳ **T5.3** 错误处理 & 边界情况
+- ⏳ **T5.4** 响应式适配
+- ⏳ **T5.5** merge to main，发布
+
+---
+
+## 完成记录
+
+### 2026-02-25 Phase 1 完成
+- Git: `66aa6a7` feat: Phase 1 layout
+- 内容：App.tsx, TabBar, ChatPage骨架, Sidebar骨架, 占位页面, 暗色主题, Vite proxy, TS alias
+
+---
+
+*每次 session 更新此文件后 commit。*
