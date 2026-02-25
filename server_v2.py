@@ -123,9 +123,61 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
     # ── API handlers (stubs for now, will be implemented in T2.2-T2.5) ──
 
     def _handle_get_sessions(self, params):
-        """GET /api/sessions — list all sessions."""
-        # TODO: T2.2 - implement real session listing
-        self._send_json({'sessions': [], '_todo': 'T2.2'})
+        """GET /api/sessions — list all sessions with summary and metadata."""
+        sessions = []
+        if not os.path.isdir(SESSIONS_DIR):
+            self._send_json({'sessions': sessions})
+            return
+
+        for filepath in glob.glob(os.path.join(SESSIONS_DIR, '*.jsonl')):
+            session_id = os.path.basename(filepath).replace('.jsonl', '')
+            metadata = {}
+            first_user_content = ''
+            message_count = 0
+
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if obj.get('_type') == 'metadata':
+                        metadata = obj
+                        continue
+
+                    role = obj.get('role', '')
+                    if role in ('user', 'assistant', 'tool'):
+                        message_count += 1
+
+                    # Capture first user message for summary
+                    if role == 'user' and not first_user_content:
+                        content = obj.get('content', '')
+                        # Strip [Runtime Context] block
+                        content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
+                        first_user_content = content[:80] if content else ''
+
+            summary = first_user_content or session_id
+            last_active = metadata.get('updated_at', '')
+            if not last_active:
+                # Fallback: file modification time
+                mtime = os.path.getmtime(filepath)
+                from datetime import datetime
+                last_active = datetime.fromtimestamp(mtime).isoformat()
+
+            sessions.append({
+                'id': session_id,
+                'summary': summary,
+                'lastActiveAt': last_active,
+                'messageCount': message_count,
+            })
+
+        # Sort by lastActiveAt descending
+        sessions.sort(key=lambda s: s['lastActiveAt'], reverse=True)
+        self._send_json({'sessions': sessions})
 
     def _handle_get_messages(self, session_id, params):
         """GET /api/sessions/:id/messages — paginated messages."""

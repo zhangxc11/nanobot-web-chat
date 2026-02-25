@@ -37,14 +37,12 @@
   - 所有 handler 为 stub（返回空数据/501）
   - Vite proxy 已更新指向 8081
 
-- 🔜 **T2.2** 实现 `GET /api/sessions` — Session 列表
-  - 扫描 `~/.nanobot/workspace/sessions/*.jsonl`
-  - 读取每个文件的 metadata（created_at, updated_at）
-  - 生成摘要：第一条 user 消息的 content，去掉 `[Runtime Context]`，截取前 50 字符
-  - 统计消息数量
-  - 按 updated_at 倒序返回
+- ✅ **T2.2** 实现 `GET /api/sessions` — Session 列表 (2026-02-25)
+  - 扫描 sessions/*.jsonl，解析 metadata + 首条 user 消息
+  - 去掉 [Runtime Context]，截取前 80 字符作为摘要
+  - 按 updated_at 倒序，已验证返回正确数据
 
-- ⏳ **T2.3** 实现 `GET /api/sessions/:id/messages` — 分页消息
+- 🔜 **T2.3** 实现 `GET /api/sessions/:id/messages` — 分页消息
   - 参数：`limit`（默认 30）、`before`（时间戳，用于向前翻页）
   - 读取 jsonl 文件，跳过 `_type: metadata` 行
   - 返回 messages 数组 + hasMore 标记
