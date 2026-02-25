@@ -198,7 +198,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
                 logger.error(f"Failed to read session {session_id}: {e}")
                 continue
 
-            summary = metadata.get('custom_name') or first_user_content or session_id
+            summary = metadata.get('custom_name') or (metadata.get('metadata') or {}).get('custom_name') or first_user_content or session_id
             last_active = metadata.get('updated_at', '')
             if not last_active:
                 mtime = os.path.getmtime(filepath)
@@ -349,6 +349,10 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
                     obj = json.loads(stripped)
                     if obj.get('_type') == 'metadata':
                         obj['custom_name'] = new_name
+                        # Also store in nested metadata so nanobot session save preserves it
+                        if 'metadata' not in obj or not isinstance(obj.get('metadata'), dict):
+                            obj['metadata'] = {}
+                        obj['metadata']['custom_name'] = new_name
                         from datetime import datetime
                         obj['updated_at'] = datetime.now().isoformat()
                         lines[i] = json.dumps(obj, ensure_ascii=False) + '\n'

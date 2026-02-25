@@ -290,4 +290,26 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 
 ---
 
+## Phase 13.1: Bug 修复 — Session 重命名发消息后被恢复
+
+### 问题
+- 用户重命名 session 后，发送新消息，session 标题被恢复成原始标题（第一条用户消息内容）
+
+### 根因分析
+1. Gateway rename 将 `custom_name` 写在 JSONL metadata 行的**顶层**：`obj['custom_name'] = '新名称'`
+2. nanobot agent 执行后调用 `session.save()` 重写整个 JSONL 文件
+3. nanobot 的 `Session.load()` 只读取嵌套的 `data.get('metadata', {})` 字段，**不保留顶层的 `custom_name`**
+4. `Session.save()` 重写时 metadata 行只包含 `session.metadata`（嵌套字段），顶层 `custom_name` 丢失
+5. 下次 `fetchSessions` 时 `metadata.get('custom_name')` 返回 None，回退到 `first_user_content`
+
+### 修复
+- **gateway.py rename**: 同时将 `custom_name` 写入顶层和嵌套 `metadata` 字段
+- **gateway.py _handle_get_sessions**: 读取时同时检查顶层和嵌套 `metadata` 字段的 `custom_name`
+- **手动修复**: 已修复 `cli_webchat.jsonl` 的现有数据
+
+### 改动文件
+- `gateway.py` — rename 和 get_sessions 逻辑
+
+---
+
 *每次 session 更新此文件后 commit。*
