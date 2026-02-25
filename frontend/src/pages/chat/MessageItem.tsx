@@ -1,4 +1,5 @@
 import type { Message } from '@/types';
+import { MarkdownRenderer } from '@/components/Markdown';
 import styles from './MessageList.module.css';
 
 interface MessageItemProps {
@@ -24,7 +25,7 @@ export default function MessageItem({ message }: MessageItemProps) {
       <div className={`${styles.message} ${styles.toolMessage}`}>
         <details className={styles.toolDetails}>
           <summary className={styles.toolSummary}>
-            🔧 工具调用: {message.name || 'unknown'}
+            🔧 工具调用结果: {message.name || 'unknown'}
           </summary>
           <pre className={styles.toolContent}>{content}</pre>
         </details>
@@ -52,7 +53,15 @@ export default function MessageItem({ message }: MessageItemProps) {
   return (
     <div className={`${styles.message} ${isUser ? styles.userMessage : styles.assistantMessage}`}>
       <div className={styles.bubble}>
-        <div className={styles.content}>{content}</div>
+        <div className={styles.content}>
+          {isUser ? (
+            // User messages: plain text with whitespace preserved
+            content
+          ) : (
+            // Assistant messages: render as Markdown
+            <MarkdownRenderer content={content} />
+          )}
+        </div>
         {timestamp && (
           <div className={styles.timestamp}>{formatTimestamp(timestamp)}</div>
         )}
