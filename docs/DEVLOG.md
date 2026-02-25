@@ -24,6 +24,7 @@
 | Phase 13.1: Bug 修复 — Session 重命名后发消息被恢复 | ✅ 已完成 | main |
 | Phase 14: 功能模块 v2.0 — 配置/记忆/Skill | 🔜 进行中 | main |
 | Phase 15: Bug 修复 — SSE 断开后前端误判任务完成 | ✅ 已完成 | main |
+| Phase 16: Bug 修复 — 消息 timestamp 不准确 | ✅ 已完成 | main (nanobot core) |
 
 ---
 
@@ -311,6 +312,30 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 
 ### 改动文件
 - `gateway.py` — rename 和 get_sessions 逻辑
+
+---
+
+## Phase 16: Bug 修复 — 消息 timestamp 不准确
+
+### 问题
+- cli_webchat.jsonl 第 969 行，user 消息的 `timestamp: 2026-02-26T01:34:33` 但消息内嵌的 `Current Time: 01:30`
+- 差了约 4 分钟，因为任务执行了 4 分钟
+
+### 根因分析
+- `context.py` 的 `build_messages`、`add_assistant_message`、`add_tool_result` 创建消息时**都不设 timestamp**
+- `loop.py` 的 `_save_turn` 在任务完成后批量保存时，用 `entry.setdefault("timestamp", datetime.now().isoformat())` 统一设置
+- 导致**所有消息（user/assistant/tool）的 timestamp 都是任务完成时间**，而非各自实际发生的时间
+- 对于长时间运行的任务（如重启 gateway 花了 4 分钟），偏差显著
+
+### 修复 (nanobot 核心, commit `81d4947`)
+- `context.py` 的三个消息创建函数中，在 `messages.append(...)` 时立即记录 `timestamp: datetime.now().isoformat()`
+  - `build_messages` — user 消息
+  - `add_assistant_message` — assistant 消息
+  - `add_tool_result` — tool 结果
+- `_save_turn` 的 `setdefault` 作为兜底保留，不会覆盖已有值
+
+### 改动文件
+- `nanobot/agent/context.py` (nanobot 核心仓库)
 
 ---
 
