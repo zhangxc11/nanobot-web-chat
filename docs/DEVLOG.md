@@ -148,6 +148,30 @@
 - ✅ **T7.3** subprocess timeout 从 120s 调整为 300s
 - ✅ **T7.4** 验证 + build + commit
 
+## Phase 8: Bug 修复 + 架构拆分 v1.2
+
+### 问题清单
+
+| # | 问题 | 根因 | 状态 |
+|---|------|------|------|
+| 1 | 页面刷新后停留在最上面，而不是最下面 | `MessageList.tsx` 初始加载 30 条消息时 `diff > 3`，跳过了 scrollToBottom 逻辑 | ✅ 已修复 |
+| 2 | 后端代码修改影响 nanobot 执行 | `server_v2.py` 单进程同时负责 API + nanobot 执行，修改重启会中断当前请求 | 📋 架构方案已设计，待实施 |
+
+### 修复任务
+
+- ✅ **T8.1** 页面刷新/初始加载后自动滚到底部
+  - 添加 `isInitialLoadRef` 区分初始加载和加载更多历史
+  - 初始加载完成后用 `requestAnimationFrame` + `scrollIntoView({ behavior: 'instant' })` 立即滚到底部
+  - 加载更多历史时保持原有的滚动位置恢复逻辑
+- ✅ **T8.2** 架构拆分方案设计 → 更新 `docs/ARCHITECTURE.md` 第九章
+  - 方案：拆分为 Gateway (gateway.py :8081) + Worker (worker.py :8082)
+  - Worker 只负责调用 nanobot agent，代码极简，几乎不需要修改
+  - Gateway 负责静态文件、API、转发聊天请求
+- 🔜 **T9.1** 创建 `worker.py`（独立 HTTP 服务 :8082）
+- **T9.2** 修改 `server_v2.py` → `gateway.py`（聊天请求转发到 worker）
+- **T9.3** 启动脚本 + 测试
+- **T9.4** 文档更新 + commit
+
 ---
 
 *每次 session 更新此文件后 commit。*

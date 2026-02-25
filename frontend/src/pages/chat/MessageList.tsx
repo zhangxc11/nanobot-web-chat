@@ -27,22 +27,41 @@ export default function MessageList() {
   const loadMoreMessages = useMessageStore((s) => s.loadMoreMessages);
   const clearMessages = useMessageStore((s) => s.clearMessages);
 
+  // Track whether the current load is an initial load (vs loadMore)
+  const isInitialLoadRef = useRef(false);
+
   // Load messages when active session changes
   useEffect(() => {
     if (activeSessionId) {
+      isInitialLoadRef.current = true;
       loadMessages(activeSessionId);
     } else {
       clearMessages();
     }
   }, [activeSessionId, loadMessages, clearMessages]);
 
-  // Auto-scroll to bottom when new messages arrive or sending starts
+  // Auto-scroll to bottom on initial load or when new messages are appended
   const prevMsgCountRef = useRef(0);
   useEffect(() => {
-    // Only auto-scroll if messages were appended (not prepended via loadMore)
+    if (messages.length === 0) {
+      prevMsgCountRef.current = 0;
+      return;
+    }
+
+    if (isInitialLoadRef.current) {
+      // Initial load: always scroll to bottom (like opening a chat in IM)
+      isInitialLoadRef.current = false;
+      // Use requestAnimationFrame to ensure DOM has rendered
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'instant' });
+      });
+      prevMsgCountRef.current = messages.length;
+      return;
+    }
+
+    // Subsequent updates: only auto-scroll if a small number of messages were appended
     if (messages.length > prevMsgCountRef.current) {
       const diff = messages.length - prevMsgCountRef.current;
-      // If a small number of messages were added at the end, scroll down
       if (diff <= 3) {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
       }
