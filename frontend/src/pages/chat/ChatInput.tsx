@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, KeyboardEvent, ChangeEvent } from 'react';
+import { useState, useRef, useCallback, useEffect, KeyboardEvent, ChangeEvent } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { useSessionStore } from '@/store/sessionStore';
 import styles from './ChatInput.module.css';
@@ -8,6 +8,13 @@ export default function ChatInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sending, sendMessage } = useMessageStore();
   const { activeSessionId } = useSessionStore();
+
+  // Auto-focus when active session changes
+  useEffect(() => {
+    if (activeSessionId) {
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+  }, [activeSessionId]);
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
