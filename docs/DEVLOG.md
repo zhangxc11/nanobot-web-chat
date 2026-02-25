@@ -29,14 +29,15 @@
 
 ### 后端任务
 
-- 🔜 **T2.1** 创建 `server_v2.py` 基础框架
+- ✅ **T2.1** 创建 `server_v2.py` 基础框架 (2026-02-25)
   - Python http.server，端口 8081
   - 路由分发：`/api/sessions`, `/api/sessions/:id/messages`
   - CORS 支持（允许 Vite dev server 5173 访问）
-  - 能启动、能返回 hello world
-  - 更新 Vite proxy 指向 8081
+  - 健康检查 `/api/health`
+  - 所有 handler 为 stub（返回空数据/501）
+  - Vite proxy 已更新指向 8081
 
-- ⏳ **T2.2** 实现 `GET /api/sessions` — Session 列表
+- 🔜 **T2.2** 实现 `GET /api/sessions` — Session 列表
   - 扫描 `~/.nanobot/workspace/sessions/*.jsonl`
   - 读取每个文件的 metadata（created_at, updated_at）
   - 生成摘要：第一条 user 消息的 content，去掉 `[Runtime Context]`，截取前 50 字符
