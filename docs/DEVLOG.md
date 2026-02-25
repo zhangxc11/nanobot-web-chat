@@ -42,13 +42,13 @@
   - 去掉 [Runtime Context]，截取前 80 字符作为摘要
   - 按 updated_at 倒序，已验证返回正确数据
 
-- 🔜 **T2.3** 实现 `GET /api/sessions/:id/messages` — 分页消息
-  - 参数：`limit`（默认 30）、`before`（时间戳，用于向前翻页）
-  - 读取 jsonl 文件，跳过 `_type: metadata` 行
-  - 返回 messages 数组 + hasMore 标记
-  - 为每条消息生成 id（行号或 hash）
+- ✅ **T2.3** 实现 `GET /api/sessions/:id/messages` — 分页消息 (2026-02-25)
+  - 支持 limit（默认30）和 before（时间戳）参数
+  - 解析 tool_calls、tool_call_id、name 字段
+  - 用户消息自动去掉 [Runtime Context]
+  - 返回 messages + hasMore，已验证分页正确
 
-- ⏳ **T2.4** 实现 `POST /api/sessions/:id/messages` — 发送消息
+- 🔜 **T2.4** 实现 `POST /api/sessions/:id/messages` — 发送消息
   - 接收 `{ "message": "..." }`
   - 调用 `nanobot agent -m "<msg>" --no-markdown -s "webchat:<session_id>"`
   - 返回 `{ "reply": "..." }`

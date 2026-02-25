@@ -180,13 +180,84 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         self._send_json({'sessions': sessions})
 
     def _handle_get_messages(self, session_id, params):
-        """GET /api/sessions/:id/messages — paginated messages."""
-        # TODO: T2.3 - implement real message loading
+        """GET /api/sessions/:id/messages — paginated messages.
+
+        Query params:
+          - limit: max messages to return (default 30)
+          - before: only return messages with timestamp < this value (for pagination)
+        """
+        # Validate session_id
+        if '/' in session_id or '..' in session_id:
+            self._send_json({'error': 'Invalid session id'}, 400)
+            return
+
+        filepath = os.path.join(SESSIONS_DIR, session_id + '.jsonl')
+        if not os.path.exists(filepath):
+            self._send_json({'error': 'Session not found'}, 404)
+            return
+
+        limit = int(params.get('limit', ['30'])[0])
+        before = params.get('before', [''])[0]  # ISO timestamp string
+
+        # Read all messages from file
+        all_messages = []
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if obj.get('_type') == 'metadata':
+                    continue
+
+                role = obj.get('role', '')
+                if role not in ('user', 'assistant', 'tool'):
+                    continue
+
+                msg = {
+                    'id': f'msg_{line_num}',
+                    'role': role,
+                    'content': obj.get('content', ''),
+                    'timestamp': obj.get('timestamp', ''),
+                }
+
+                # Include tool_calls for assistant messages
+                if obj.get('tool_calls'):
+                    msg['toolCalls'] = []
+                    for tc in obj['tool_calls']:
+                        msg['toolCalls'].append({
+                            'id': tc.get('id', ''),
+                            'name': tc.get('function', {}).get('name', ''),
+                            'arguments': tc.get('function', {}).get('arguments', ''),
+                        })
+
+                # Include tool call metadata for tool messages
+                if role == 'tool':
+                    msg['toolCallId'] = obj.get('tool_call_id', '')
+                    msg['name'] = obj.get('name', '')
+
+                # Strip [Runtime Context] from user messages for display
+                if role == 'user':
+                    content = msg['content']
+                    msg['content'] = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
+
+                all_messages.append(msg)
+
+        # Apply pagination: if 'before' is specified, filter messages before that timestamp
+        if before:
+            all_messages = [m for m in all_messages if m['timestamp'] < before]
+
+        # Return the last `limit` messages (most recent)
+        has_more = len(all_messages) > limit
+        messages = all_messages[-limit:] if has_more else all_messages
+
         self._send_json({
-            'messages': [],
-            'hasMore': False,
-            '_todo': 'T2.3',
-            '_session_id': session_id
+            'messages': messages,
+            'hasMore': has_more,
         })
 
     def _handle_create_session(self):
