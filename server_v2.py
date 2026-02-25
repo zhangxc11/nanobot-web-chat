@@ -15,6 +15,7 @@ import os
 import glob
 import re
 import urllib.parse
+import mimetypes
 
 PORT = 8081
 for i, arg in enumerate(sys.argv):
@@ -22,6 +23,9 @@ for i, arg in enumerate(sys.argv):
         PORT = int(sys.argv[i + 1])
 
 SESSIONS_DIR = os.path.expanduser('~/.nanobot/workspace/sessions')
+# Static files directory: frontend/dist relative to this script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(SCRIPT_DIR, 'frontend', 'dist')
 
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
@@ -102,7 +106,12 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_messages(route_params['id'], params)
             return
 
-        self._send_json({'error': 'Not found'}, 404)
+        # ── Static file serving (SPA fallback) ──
+        if path.startswith('/api/'):
+            self._send_json({'error': 'Not found'}, 404)
+            return
+
+        self._serve_static(path)
 
     # ── POST routes ──
 
@@ -323,6 +332,49 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             reply = f'❌ 错误: {str(e)}'
 
         self._send_json({'reply': reply})
+
+    def _serve_static(self, path):
+        """Serve static files from frontend/dist with SPA fallback."""
+        if not os.path.isdir(STATIC_DIR):
+            self._send_json({'error': 'Frontend not built. Run: cd frontend && npm run build'}, 500)
+            return
+
+        # Map URL path to file path
+        if path == '' or path == '/':
+            file_path = os.path.join(STATIC_DIR, 'index.html')
+        else:
+            # Remove leading slash
+            rel_path = path.lstrip('/')
+            file_path = os.path.join(STATIC_DIR, rel_path)
+
+        # Security: prevent directory traversal
+        real_path = os.path.realpath(file_path)
+        real_static = os.path.realpath(STATIC_DIR)
+        if not real_path.startswith(real_static):
+            self._send_json({'error': 'Forbidden'}, 403)
+            return
+
+        # If file doesn't exist, serve index.html (SPA routing)
+        if not os.path.isfile(file_path):
+            file_path = os.path.join(STATIC_DIR, 'index.html')
+
+        try:
+            with open(file_path, 'rb') as f:
+                content = f.read()
+            content_type, _ = mimetypes.guess_type(file_path)
+            if content_type is None:
+                content_type = 'application/octet-stream'
+
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', len(content))
+            # Cache static assets (they have hashed filenames)
+            if '/assets/' in file_path:
+                self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+            self.end_headers()
+            self.wfile.write(content)
+        except IOError:
+            self._send_json({'error': 'File not found'}, 404)
 
 
 if __name__ == '__main__':
