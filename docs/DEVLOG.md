@@ -48,14 +48,15 @@
   - 用户消息自动去掉 [Runtime Context]
   - 返回 messages + hasMore，已验证分页正确
 
-- 🔜 **T2.4** 实现 `POST /api/sessions/:id/messages` — 发送消息
-  - 接收 `{ "message": "..." }`
-  - 调用 `nanobot agent -m "<msg>" --no-markdown -s "webchat:<session_id>"`
-  - 返回 `{ "reply": "..." }`
+- ✅ **T2.4** 实现 `POST /api/sessions/:id/messages` — 发送消息 (2026-02-25)
+  - 调用 nanobot CLI: `nanobot agent -m "<msg>" --no-markdown -s "cli:<session_id>"`
+  - 120s 超时，错误处理
 
-- ⏳ **T2.5** 实现 `POST /api/sessions` — 创建新 Session
-  - 生成 session id：`webchat_<timestamp>`
-  - 返回新 session 信息
+- ✅ **T2.5** 实现 `POST /api/sessions` — 创建新 Session (2026-02-25)
+  - 生成 id: `webchat_<timestamp>`
+  - 创建 .jsonl 文件并写入 metadata
+
+- 🔜 **T2.6** 完善 `services/api.ts` — 对接真实 API
 
 ### 前端任务
 

@@ -262,13 +262,67 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_create_session(self):
         """POST /api/sessions — create new session."""
-        # TODO: T2.5 - implement session creation
-        self._send_json({'error': 'Not implemented'}, 501)
+        from datetime import datetime
+        timestamp = int(datetime.now().timestamp())
+        session_id = f'webchat_{timestamp}'
+
+        # Create an empty session file (nanobot will populate metadata on first message)
+        filepath = os.path.join(SESSIONS_DIR, session_id + '.jsonl')
+        os.makedirs(SESSIONS_DIR, exist_ok=True)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            meta = {
+                '_type': 'metadata',
+                'key': f'cli:{session_id}',
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat(),
+                'metadata': {},
+                'last_consolidated': 0,
+            }
+            f.write(json.dumps(meta, ensure_ascii=False) + '\n')
+
+        self._send_json({
+            'id': session_id,
+            'summary': '新对话',
+            'lastActiveAt': datetime.now().isoformat(),
+            'messageCount': 0,
+        })
 
     def _handle_send_message(self, session_id):
-        """POST /api/sessions/:id/messages — send message."""
-        # TODO: T2.4 - implement message sending
-        self._send_json({'error': 'Not implemented'}, 501)
+        """POST /api/sessions/:id/messages — send message via nanobot CLI."""
+        # Validate session_id
+        if '/' in session_id or '..' in session_id:
+            self._send_json({'error': 'Invalid session id'}, 400)
+            return
+
+        data = self._read_body()
+        message = data.get('message', '').strip()
+        if not message:
+            self._send_json({'error': 'Empty message'}, 400)
+            return
+
+        try:
+            # Call nanobot CLI with the session key
+            result = subprocess.run(
+                ['nanobot', 'agent', '-m', message, '--no-markdown', '-s', f'cli:{session_id}'],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            reply = result.stdout.strip()
+            # Remove nanobot header line if present (e.g., "🐈 nanobot ...")
+            lines = reply.split('\n')
+            if lines and '🐈' in lines[0]:
+                reply = '\n'.join(lines[1:]).strip()
+            if not reply and result.stderr:
+                reply = f'(stderr) {result.stderr.strip()}'
+            if not reply:
+                reply = '(无回复)'
+        except subprocess.TimeoutExpired:
+            reply = '⏱️ 请求超时，请稍后重试'
+        except Exception as e:
+            reply = f'❌ 错误: {str(e)}'
+
+        self._send_json({'reply': reply})
 
 
 if __name__ == '__main__':
