@@ -23,6 +23,7 @@
 | Phase 12: 优雅降级 — Gateway 重启不中断任务 | ✅ 已完成 | main |
 | Phase 13.1: Bug 修复 — Session 重命名后发消息被恢复 | ✅ 已完成 | main |
 | Phase 14: 功能模块 v2.0 — 配置/记忆/Skill | 🔜 进行中 | main |
+| Phase 15: Bug 修复 — SSE 断开后前端误判任务完成 | ✅ 已完成 | main |
 
 ---
 
@@ -310,6 +311,35 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 
 ### 改动文件
 - `gateway.py` — rename 和 get_sessions 逻辑
+
+---
+
+## Phase 15: Bug 修复 — SSE 断开后前端误判任务完成
+
+### 问题
+- 从 Web UI 发送"请重启 gateway"，nanobot 执行 `kill` 杀掉旧 gateway 并启动新 gateway
+- 任务实际在 worker 后台继续运行并成功完成（worker 日志 01:34:33 Task done），JSONL 也有完整记录
+- 但前端**没有显示**任务结果，看起来像"没有记录"
+
+### 根因分析
+1. 旧 gateway (PID 84006) 在 01:30:43 收到消息，转发给 worker 建立 SSE 连接
+2. nanobot agent (PID 86972) 在 ~01:30:58 执行 `kill 84006`，旧 gateway 死亡
+3. SSE 连接断开，前端 `reader.read()` 返回 `{ done: true }`
+4. **Bug**: `api.ts` 的 `sendMessageStream` 在 stream 结束时有兜底逻辑 `callbacks.onDone()`
+5. 这导致 `messageStore` 认为任务"正常完成"，立即调用 `_reloadMessages` 从 JSONL 加载
+6. 但此时 nanobot 还在运行中（01:30→01:34），JSONL 尚未写入最终结果
+7. 前端加载到不完整的消息列表，看起来像"没有记录"
+8. 由于 `onDone` 被调用而非 `onError`，前端**不会进入 polling recovery 模式**
+
+### 修复
+- `api.ts`: 添加 `receivedDoneOrError` 标志位跟踪是否收到了显式的 `done`/`error` SSE 事件
+- 当 stream 结束但未收到显式事件时，调用 `callbacks.onError('SSE connection reset — task may still be running')` 而非 `callbacks.onDone()`
+- 错误消息包含 `reset` 关键词，匹配 `messageStore` 的 `isConnectionError` 正则，触发 polling recovery
+- 这样前端会通过 `GET /api/sessions/:id/task-status` 轮询 worker 直到任务真正完成
+
+### 改动文件
+- `frontend/src/services/api.ts` — sendMessageStream 的 stream 结束处理逻辑
+- `frontend/src/pages/chat/MessageItem.tsx` — 修复 unused import (TS6133)
 
 ---
 

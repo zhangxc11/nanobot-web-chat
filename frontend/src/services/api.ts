@@ -121,6 +121,7 @@ export function sendMessageStream(
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let receivedDoneOrError = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -154,9 +155,11 @@ export function sendMessageStream(
                   callbacks.onProgress(parsed.text || '');
                   break;
                 case 'done':
+                  receivedDoneOrError = true;
                   callbacks.onDone();
                   return;
                 case 'error':
+                  receivedDoneOrError = true;
                   callbacks.onError(parsed.message || '未知错误');
                   return;
               }
@@ -166,8 +169,12 @@ export function sendMessageStream(
           }
         }
 
-        // Stream ended without explicit done event
-        callbacks.onDone();
+        // Stream ended — check if we received an explicit done/error event.
+        // If not, the connection was likely interrupted (e.g. gateway restart)
+        // and the task may still be running in the worker background.
+        if (!receivedDoneOrError) {
+          callbacks.onError('SSE connection reset — task may still be running');
+        }
       } else {
         // Fallback: legacy JSON response
         const data = await res.json();
