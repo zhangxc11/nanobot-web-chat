@@ -1,4 +1,4 @@
-// API service layer — talks to server_v2.py (port 8081 via Vite proxy)
+// API service layer — talks to gateway.py (port 8081 via Vite proxy)
 
 import type { Session, Message } from '@/types';
 

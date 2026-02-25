@@ -15,14 +15,16 @@
 | Phase 4: Markdown & 代码高亮 | ✅ 已完成 | merged to develop |
 | Phase 5: 完善 & 部署 | ✅ 已完成 | merged to main |
 | Phase 6: 迭代优化 v1.1 | ✅ 已完成 | merged to main |
+| Phase 7: Bug 修复 v1.2 | ✅ 已完成 | main |
+| Phase 8: Bug 修复 + 架构拆分 v1.2 | ✅ 已完成 | main |
 
 ---
 
 ## ⚠️ 重要约束
 
-1. **不破坏现有服务**：`server.py` + `index.html` 是正在用的，不要修改。新后端写 `server_v2.py`，端口 8081。
+1. **不破坏现有服务**：`server.py` + `index.html` 是旧版 UI（已弃用）。新架构使用 `gateway.py` (:8081) + `worker.py` (:8082)。
 2. **每次 session 只做 1 个小任务**：找到 🔜，做完标 ✅，标下一个 🔜，commit。
-3. **Vite proxy 指向 server_v2.py (8081)**，不影响现有 server.py (8080)。
+3. **Vite proxy 指向 gateway.py (8081)**。
 
 ---
 
@@ -167,10 +169,18 @@
   - 方案：拆分为 Gateway (gateway.py :8081) + Worker (worker.py :8082)
   - Worker 只负责调用 nanobot agent，代码极简，几乎不需要修改
   - Gateway 负责静态文件、API、转发聊天请求
-- 🔜 **T9.1** 创建 `worker.py`（独立 HTTP 服务 :8082）
-- **T9.2** 修改 `server_v2.py` → `gateway.py`（聊天请求转发到 worker）
-- **T9.3** 启动脚本 + 测试
-- **T9.4** 文档更新 + commit
+- ✅ **T9.1** 创建 `worker.py`（独立 HTTP 服务 :8082）
+- ✅ **T9.2** 创建 `gateway.py`（API + 静态文件，聊天请求转发到 worker）
+- ✅ **T9.3** 启动脚本 `start.sh` + 端到端测试通过
+- ✅ **T9.4** 文档更新 + 确认 gateway.py 完全替代 server_v2.py
+
+### 2026-02-25 架构拆分完成 (T9.1-T9.4)
+- worker.py (:8082): 极简 nanobot agent 执行器，~80 行代码
+- gateway.py (:8081): API 网关 + 静态文件服务，聊天请求转发到 worker
+- start.sh: 同时启动 gateway + worker，Ctrl+C 统一清理
+- 端到端测试通过：health, sessions, messages, chat forwarding
+- 启动方式：`cd web-chat && bash start.sh` 或 `open http://127.0.0.1:8081`
+- server_v2.py 保留作为历史参考，gateway.py 是其拆分后的替代品
 
 ---
 
