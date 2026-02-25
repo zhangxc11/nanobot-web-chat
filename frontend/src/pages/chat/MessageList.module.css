@@ -1,6 +1,13 @@
 /* ── Message List ── */
 
 .messageList {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.messageContent {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -8,6 +15,8 @@
   max-width: 800px;
   margin: 0 auto;
   width: 100%;
+  /* Push content to bottom when few messages */
+  margin-top: auto;
 }
 
 .emptyState {
