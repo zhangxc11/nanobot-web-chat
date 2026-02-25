@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { useSessionStore } from '@/store/sessionStore';
-import MessageItem from './MessageItem';
+import MessageItem, { groupMessages, AssistantTurnGroup } from './MessageItem';
 import styles from './MessageList.module.css';
 
 function TypingIndicator() {
@@ -127,9 +127,13 @@ export default function MessageList() {
             {loading && <span>加载中...</span>}
           </div>
         )}
-        {messages.map((msg) => (
-          <MessageItem key={msg.id} message={msg} />
-        ))}
+        {groupMessages(messages).map((group, idx) => {
+          if (group.type === 'user') {
+            return <MessageItem key={group.messages[0].id} message={group.messages[0]} />;
+          }
+          // assistant-turn: render compactly
+          return <AssistantTurnGroup key={`turn-${idx}`} messages={group.messages} />;
+        })}
         {sending && <TypingIndicator />}
         {error && messages.length > 0 && (
           <div className={styles.errorBanner}>
