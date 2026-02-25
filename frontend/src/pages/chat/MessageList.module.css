@@ -100,17 +100,29 @@
 
 /* ── Tool Call Compact Lines ── */
 
+.turnContent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.turnTextSegment {
+  /* Inline text segments within a turn bubble — no extra spacing */
+}
+
+.turnTextSegment + .toolCallLine,
+.toolCallLine + .turnTextSegment {
+  margin-top: 2px;
+}
+
 .toolCallGroup {
-  align-self: flex-start;
-  max-width: 90%;
   margin: 2px 0;
-  padding: 4px 0;
 }
 
 .toolCallLine {
   font-size: 13px;
   color: var(--text-muted);
-  margin: 1px 0;
+  margin: 0;
 }
 
 .toolCallLineHeader {
@@ -118,9 +130,9 @@
   align-items: baseline;
   gap: 4px;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 1px 4px;
   border-radius: 4px;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 .toolCallLineHeader:hover {

@@ -20,7 +20,6 @@ function formatTimestamp(ts: string): string {
 /** Truncate tool output to a short summary */
 function truncateToolOutput(content: string, maxLen = 60): string {
   if (!content) return '(无输出)';
-  // Take first non-empty line
   const firstLine = content.split('\n').find(l => l.trim()) || content;
   const trimmed = firstLine.trim();
   if (trimmed.length <= maxLen) return trimmed;
@@ -55,17 +54,11 @@ function ToolCallLine({ name, content }: { name: string; content: string }) {
 export default function MessageItem({ message }: MessageItemProps) {
   const { role, content, timestamp } = message;
 
-  // Tool messages: render as compact line (used in grouped view)
   if (role === 'tool') {
-    return (
-      <ToolCallLine name={message.name || 'unknown'} content={content} />
-    );
+    return <ToolCallLine name={message.name || 'unknown'} content={content} />;
   }
 
-  // Assistant messages with only tool_calls (no content) — render tool call names as compact lines
   if (role === 'assistant' && message.toolCalls && message.toolCalls.length > 0 && !content) {
-    // These will be rendered inline in the message group, not as standalone items
-    // Return null here; the grouping logic in MessageList handles them
     return null;
   }
 
@@ -75,11 +68,7 @@ export default function MessageItem({ message }: MessageItemProps) {
     <div className={`${styles.message} ${isUser ? styles.userMessage : styles.assistantMessage}`}>
       <div className={styles.bubble}>
         <div className={styles.content}>
-          {isUser ? (
-            content
-          ) : (
-            <MarkdownRenderer content={content} />
-          )}
+          {isUser ? content : <MarkdownRenderer content={content} />}
         </div>
         {timestamp && (
           <div className={styles.timestamp}>{formatTimestamp(timestamp)}</div>
@@ -89,16 +78,8 @@ export default function MessageItem({ message }: MessageItemProps) {
   );
 }
 
-/**
- * Group messages into "conversation turns" for compact rendering.
- * 
- * A group is:
- * - A user message (standalone)
- * - An assistant turn: optional text + tool calls + tool results + optional final text
- * 
- * Returns an array of groups, where each group is an array of messages.
- * Tool-related messages in a group are rendered compactly.
- */
+// ── Grouping logic ──
+
 export interface MessageGroup {
   type: 'user' | 'assistant-turn';
   messages: Message[];
@@ -117,7 +98,6 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
       continue;
     }
 
-    // Start of an assistant turn: collect all consecutive assistant+tool messages
     if (msg.role === 'assistant' || msg.role === 'tool') {
       const turnMessages: Message[] = [];
       while (i < messages.length && (messages[i].role === 'assistant' || messages[i].role === 'tool')) {
@@ -128,7 +108,6 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
       continue;
     }
 
-    // Fallback: treat as standalone
     groups.push({ type: 'user', messages: [msg] });
     i++;
   }
@@ -136,37 +115,48 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
   return groups;
 }
 
-/** Render a grouped assistant turn compactly */
+/**
+ * Render an entire assistant turn as ONE bubble.
+ * Inside the bubble: text segments + compact tool call lines, all tightly packed.
+ */
 export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
-  // Separate into: content messages and tool-related messages
+  // Build parts: each is either a text segment or a tool call line
   const parts: JSX.Element[] = [];
+  // Track which tool messages have been matched to a tool_calls entry
+  const matchedToolIds = new Set<string>();
 
+  // First pass: identify matched tool results
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.toolCalls) {
+      for (const tc of msg.toolCalls) {
+        const toolResult = messages.find(
+          m => m.role === 'tool' && m.toolCallId === tc.id
+        );
+        if (toolResult) matchedToolIds.add(toolResult.id);
+      }
+    }
+  }
+
+  // Second pass: build parts
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
 
     if (msg.role === 'assistant' && msg.content) {
-      // Assistant message with text content — render as bubble
+      // Text content — render inline as markdown
       parts.push(
-        <div key={msg.id} className={`${styles.message} ${styles.assistantMessage}`}>
-          <div className={styles.bubble}>
-            <div className={styles.content}>
-              <MarkdownRenderer content={msg.content} />
-            </div>
-            {msg.timestamp && (
-              <div className={styles.timestamp}>{formatTimestamp(msg.timestamp)}</div>
-            )}
-          </div>
+        <div key={msg.id} className={styles.turnTextSegment}>
+          <MarkdownRenderer content={msg.content} />
         </div>
       );
-    } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0 && !msg.content) {
-      // Assistant with tool_calls but no content — collect subsequent tool results
-      const toolLines: JSX.Element[] = [];
+    }
+
+    if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+      // Tool calls — render each as compact line with matched result
       for (const tc of msg.toolCalls) {
-        // Find matching tool result
         const toolResult = messages.find(
-          (m, j) => j > i && m.role === 'tool' && m.toolCallId === tc.id
+          m => m.role === 'tool' && m.toolCallId === tc.id
         );
-        toolLines.push(
+        parts.push(
           <ToolCallLine
             key={tc.id}
             name={tc.name}
@@ -174,26 +164,31 @@ export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
           />
         );
       }
-      if (toolLines.length > 0) {
-        parts.push(
-          <div key={msg.id} className={styles.toolCallGroup}>
-            {toolLines}
-          </div>
-        );
-      }
-    } else if (msg.role === 'tool') {
-      // Tool messages that weren't matched above — render standalone
-      // Check if this tool message was already rendered via a tool_calls match
-      const alreadyRendered = messages.some(
-        (m, j) => j < i && m.role === 'assistant' && m.toolCalls?.some(tc => tc.id === msg.toolCallId)
+    }
+
+    if (msg.role === 'tool' && !matchedToolIds.has(msg.id)) {
+      // Unmatched tool message — render standalone
+      parts.push(
+        <ToolCallLine key={msg.id} name={msg.name || 'unknown'} content={msg.content} />
       );
-      if (!alreadyRendered) {
-        parts.push(
-          <ToolCallLine key={msg.id} name={msg.name || 'unknown'} content={msg.content} />
-        );
-      }
     }
   }
 
-  return <>{parts}</>;
+  if (parts.length === 0) return null;
+
+  // Find last timestamp in the turn
+  const lastTimestamp = [...messages].reverse().find(m => m.timestamp)?.timestamp || '';
+
+  return (
+    <div className={`${styles.message} ${styles.assistantMessage}`}>
+      <div className={styles.bubble}>
+        <div className={styles.turnContent}>
+          {parts}
+        </div>
+        {lastTimestamp && (
+          <div className={styles.timestamp}>{formatTimestamp(lastTimestamp)}</div>
+        )}
+      </div>
+    </div>
+  );
 }
