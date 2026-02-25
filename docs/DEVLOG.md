@@ -18,6 +18,7 @@
 | Phase 7: Bug 修复 v1.2 | ✅ 已完成 | main |
 | Phase 8: Bug 修复 + 架构拆分 v1.2 | ✅ 已完成 | main |
 | Phase 9: 流式输出 (SSE Streaming) | ✅ 已完成 | main |
+| Phase 10: 工具调用折叠优化 v1.4 | 🔜 进行中 | main |
 
 ---
 
@@ -195,6 +196,25 @@
   - `MessageList.module.css`: progress 步骤样式 + fadeIn 动画
 - **SSE 事件类型**: `progress`（步骤文本）、`done`（完成）、`error`（错误）
 - **关键设计**: 任务完成后从 JSONL 重新加载消息（而非解析 stdout），确保 tool calls 等完整显示
+
+---
+
+## Phase 10: 工具调用折叠优化 v1.4
+
+### 需求
+- 最终显示的工具调用与流式输出时风格统一（`↳` 风格）
+- 整个工具调用过程默认折叠，只显示最终助手文本
+- 折叠摘要：`⚙ 使用了 N 个工具 ▸`
+- 展开后每步 `↳ tool_name → 摘要`，可再展开详情
+
+### 任务
+- 🔜 **T10.1** 重构 `MessageItem.tsx` — AssistantTurnGroup 组件改造
+  - 将工具调用部分抽取为 `ToolCallsCollapsible` 组件
+  - 默认折叠，显示 `⚙ 使用了 N 个工具 ▸`
+  - 展开后用 `↳ tool_name → 摘要` 格式（复用 ToolCallLine，改用 ↳ 箭头）
+  - 每步可点击展开详情
+- **T10.2** 更新 CSS 样式 — 折叠摘要行、展开动画
+- **T10.3** 构建 + 测试 + commit
 
 ---
 

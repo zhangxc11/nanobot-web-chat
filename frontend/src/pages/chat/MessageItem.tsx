@@ -26,7 +26,7 @@ function truncateToolOutput(content: string, maxLen = 60): string {
   return trimmed.substring(0, maxLen) + '…';
 }
 
-/** Compact tool call line — single line, expandable */
+/** Single tool call line — ↳ style, consistent with streaming progress */
 function ToolCallLine({ name, content }: { name: string; content: string }) {
   const [expanded, setExpanded] = useState(false);
   const summary = truncateToolOutput(content);
@@ -38,7 +38,7 @@ function ToolCallLine({ name, content }: { name: string; content: string }) {
         onClick={() => setExpanded(!expanded)}
         title="点击展开/折叠详情"
       >
-        <span className={styles.toolCallArrow}>{expanded ? '▾' : '▸'}</span>
+        <span className={styles.toolCallArrowIcon}>↳</span>
         <span className={styles.toolCallName}>{name}</span>
         {!expanded && (
           <span className={styles.toolCallSummary}>{summary}</span>
@@ -51,13 +51,51 @@ function ToolCallLine({ name, content }: { name: string; content: string }) {
   );
 }
 
+/** Collapsible group of all tool calls in a turn */
+function ToolCallsCollapsible({ toolCalls }: { toolCalls: { name: string; content: string; id: string }[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const count = toolCalls.length;
+
+  if (count === 0) return null;
+
+  return (
+    <div className={styles.toolCallsCollapsible}>
+      <div
+        className={styles.toolCallsToggle}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className={styles.toolCallsIcon}>⚙</span>
+        <span className={styles.toolCallsLabel}>
+          使用了 {count} 个工具
+        </span>
+        <span className={styles.toolCallsArrow}>{expanded ? '▾' : '▸'}</span>
+      </div>
+      {expanded && (
+        <div className={styles.toolCallsExpanded}>
+          {toolCalls.map((tc) => (
+            <ToolCallLine key={tc.id} name={tc.name} content={tc.content} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MessageItem({ message }: MessageItemProps) {
   const { role, content, timestamp } = message;
 
+  // Standalone tool messages (shouldn't happen with grouping, but just in case)
   if (role === 'tool') {
-    return <ToolCallLine name={message.name || 'unknown'} content={content} />;
+    return (
+      <div className={`${styles.message} ${styles.assistantMessage}`}>
+        <div className={styles.bubble}>
+          <ToolCallLine name={message.name || 'unknown'} content={content} />
+        </div>
+      </div>
+    );
   }
 
+  // Empty assistant message with only tool_calls — skip (handled by AssistantTurnGroup)
   if (role === 'assistant' && message.toolCalls && message.toolCalls.length > 0 && !content) {
     return null;
   }
@@ -117,15 +155,16 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
 
 /**
  * Render an entire assistant turn as ONE bubble.
- * Inside the bubble: text segments + compact tool call lines, all tightly packed.
+ * Tool calls are grouped into a collapsible section (default collapsed).
+ * Only the final assistant text is shown by default.
  */
 export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
-  // Build parts: each is either a text segment or a tool call line
-  const parts: React.JSX.Element[] = [];
-  // Track which tool messages have been matched to a tool_calls entry
+  // Collect tool calls with their results
+  const toolCallItems: { name: string; content: string; id: string }[] = [];
+  const textParts: React.JSX.Element[] = [];
   const matchedToolIds = new Set<string>();
 
-  // First pass: identify matched tool results
+  // First pass: match tool results to tool_calls
   for (const msg of messages) {
     if (msg.role === 'assistant' && msg.toolCalls) {
       for (const tc of msg.toolCalls) {
@@ -133,48 +172,39 @@ export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
           m => m.role === 'tool' && m.toolCallId === tc.id
         );
         if (toolResult) matchedToolIds.add(toolResult.id);
+        toolCallItems.push({
+          id: tc.id,
+          name: tc.name,
+          content: toolResult?.content || '(等待结果…)',
+        });
       }
     }
   }
 
-  // Second pass: build parts
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
+  // Second pass: collect unmatched tool messages
+  for (const msg of messages) {
+    if (msg.role === 'tool' && !matchedToolIds.has(msg.id)) {
+      toolCallItems.push({
+        id: msg.id,
+        name: msg.name || 'unknown',
+        content: msg.content,
+      });
+    }
+  }
 
+  // Third pass: collect text content from assistant messages
+  for (const msg of messages) {
     if (msg.role === 'assistant' && msg.content) {
-      // Text content — render inline as markdown
-      parts.push(
+      textParts.push(
         <div key={msg.id} className={styles.turnTextSegment}>
           <MarkdownRenderer content={msg.content} />
         </div>
       );
     }
-
-    if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-      // Tool calls — render each as compact line with matched result
-      for (const tc of msg.toolCalls) {
-        const toolResult = messages.find(
-          m => m.role === 'tool' && m.toolCallId === tc.id
-        );
-        parts.push(
-          <ToolCallLine
-            key={tc.id}
-            name={tc.name}
-            content={toolResult?.content || '(等待结果…)'}
-          />
-        );
-      }
-    }
-
-    if (msg.role === 'tool' && !matchedToolIds.has(msg.id)) {
-      // Unmatched tool message — render standalone
-      parts.push(
-        <ToolCallLine key={msg.id} name={msg.name || 'unknown'} content={msg.content} />
-      );
-    }
   }
 
-  if (parts.length === 0) return null;
+  // If nothing to render, skip
+  if (toolCallItems.length === 0 && textParts.length === 0) return null;
 
   // Find last timestamp in the turn
   const lastTimestamp = [...messages].reverse().find(m => m.timestamp)?.timestamp || '';
@@ -183,7 +213,10 @@ export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
     <div className={`${styles.message} ${styles.assistantMessage}`}>
       <div className={styles.bubble}>
         <div className={styles.turnContent}>
-          {parts}
+          {toolCallItems.length > 0 && (
+            <ToolCallsCollapsible toolCalls={toolCallItems} />
+          )}
+          {textParts}
         </div>
         {lastTimestamp && (
           <div className={styles.timestamp}>{formatTimestamp(lastTimestamp)}</div>

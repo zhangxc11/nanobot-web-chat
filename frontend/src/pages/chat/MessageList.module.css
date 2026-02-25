@@ -98,7 +98,7 @@
   text-align: right;
 }
 
-/* ── Tool Call Compact Lines ── */
+/* ── Tool Call Compact Lines (↳ style, consistent with streaming) ── */
 
 .turnContent {
   display: flex;
@@ -110,14 +110,57 @@
   /* Inline text segments within a turn bubble — no extra spacing */
 }
 
-.turnTextSegment + .toolCallLine,
-.toolCallLine + .turnTextSegment {
-  margin-top: 2px;
+.turnTextSegment + .toolCallsCollapsible,
+.toolCallsCollapsible + .turnTextSegment {
+  margin-top: 4px;
 }
 
-.toolCallGroup {
+/* ── Collapsible Tool Calls Group ── */
+
+.toolCallsCollapsible {
   margin: 2px 0;
 }
+
+.toolCallsToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+  font-size: 12px;
+  color: var(--text-muted);
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+  line-height: 1.5;
+}
+
+.toolCallsToggle:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.toolCallsIcon {
+  font-size: 13px;
+}
+
+.toolCallsLabel {
+  font-weight: 500;
+}
+
+.toolCallsArrow {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.toolCallsExpanded {
+  margin-top: 4px;
+  padding-left: 4px;
+  border-left: 2px solid var(--bg-hover);
+}
+
+/* ── Individual Tool Call Line ── */
 
 .toolCallLine {
   font-size: 13px;
@@ -139,11 +182,11 @@
   background: var(--bg-hover);
 }
 
-.toolCallArrow {
-  font-size: 10px;
-  color: var(--text-muted);
+.toolCallArrowIcon {
+  color: var(--accent);
+  font-weight: 500;
   flex-shrink: 0;
-  width: 12px;
+  width: 14px;
 }
 
 .toolCallName {
@@ -169,7 +212,7 @@
 }
 
 .toolCallDetail {
-  margin: 4px 0 4px 16px;
+  margin: 4px 0 4px 18px;
   padding: 8px;
   background: var(--bg-tertiary);
   border-radius: 6px;
