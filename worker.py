@@ -24,7 +24,6 @@ import threading
 import time
 from datetime import datetime
 
-SESSIONS_DIR = os.path.expanduser('~/.nanobot/workspace/sessions')
 
 PORT = 8082
 for i, arg in enumerate(sys.argv):
@@ -65,41 +64,6 @@ def _cleanup_old_tasks():
             del _tasks[k]
 
 
-def _extract_usage_from_jsonl(session_key):
-    """Read the last _type: 'usage' record from a session's JSONL file."""
-    # Convert session_key to filename: cli:direct → cli_direct.jsonl
-    filename = session_key.replace(':', '_') + '.jsonl'
-    filepath = os.path.join(SESSIONS_DIR, filename)
-    if not os.path.isfile(filepath):
-        return None
-    try:
-        last_usage = None
-        with open(filepath, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if obj.get('_type') == 'usage':
-                    last_usage = {
-                        'session_key': session_key,
-                        'model': obj.get('model', 'unknown'),
-                        'prompt_tokens': obj.get('prompt_tokens', 0),
-                        'completion_tokens': obj.get('completion_tokens', 0),
-                        'total_tokens': obj.get('total_tokens', 0),
-                        'llm_calls': obj.get('llm_calls', 0),
-                        'started_at': obj.get('started_at', obj.get('timestamp', '')),
-                        'finished_at': obj.get('finished_at', obj.get('timestamp', '')),
-                    }
-        return last_usage
-    except Exception as e:
-        logger.error(f"Failed to extract usage from {filepath}: {e}")
-        return None
-
-
 def _run_task_background(session_key, message):
     """Run nanobot agent in a background thread. Updates task registry."""
     task = {
@@ -113,6 +77,7 @@ def _run_task_background(session_key, message):
         '_finished_ts': 0,
         '_sse_clients': [],   # list of SSE write functions (can be empty)
         '_sse_lock': threading.Lock(),
+        '_usage': None,       # usage data extracted from stderr
     }
     with _tasks_lock:
         _tasks[session_key] = task
@@ -131,6 +96,36 @@ def _run_task_background(session_key, message):
         )
         task['pid'] = proc.pid
         logger.info(f"Task started: session={session_key}, PID={proc.pid}")
+
+        # Read stderr in a separate thread to capture usage JSON
+        def _read_stderr():
+            for line in proc.stderr:
+                line = line.rstrip('\n')
+                if not line:
+                    continue
+                # Check for __usage__ JSON marker from nanobot agent loop
+                try:
+                    obj = json.loads(line)
+                    if obj.get('__usage__'):
+                        task['_usage'] = {
+                            'session_key': session_key,
+                            'model': obj.get('model', 'unknown'),
+                            'prompt_tokens': obj.get('prompt_tokens', 0),
+                            'completion_tokens': obj.get('completion_tokens', 0),
+                            'total_tokens': obj.get('total_tokens', 0),
+                            'llm_calls': obj.get('llm_calls', 0),
+                            'started_at': obj.get('started_at', ''),
+                            'finished_at': obj.get('finished_at', ''),
+                        }
+                        logger.info(f"Usage extracted from stderr: {obj.get('total_tokens', 0)} tokens")
+                        continue
+                except (json.JSONDecodeError, ValueError):
+                    pass
+                # Log other stderr lines for debugging
+                logger.debug(f"stderr: {line[:200]}")
+
+        stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+        stderr_thread.start()
 
         # Read stdout line by line
         for line in proc.stdout:
@@ -157,16 +152,16 @@ def _run_task_background(session_key, message):
                     task['_sse_clients'] = alive
 
         proc.wait(timeout=300)
+        stderr_thread.join(timeout=5)  # Wait for stderr thread to finish
 
         if proc.returncode == 0:
             task['status'] = 'done'
             task['return_code'] = 0
             logger.info(f"Task done: session={session_key}, steps={len(task['progress'])}")
         else:
-            stderr_out = proc.stderr.read() if proc.stderr else ''
             task['status'] = 'error'
             task['return_code'] = proc.returncode
-            task['error'] = stderr_out.strip()[-500:] if stderr_out else f'exit code {proc.returncode}'
+            task['error'] = f'exit code {proc.returncode}'
             logger.error(f"Task failed: session={session_key}, code={proc.returncode}")
 
     except subprocess.TimeoutExpired:
@@ -183,8 +178,8 @@ def _run_task_background(session_key, message):
         task['finished_at'] = datetime.now().isoformat()
         task['_finished_ts'] = time.time()
 
-        # Extract usage from JSONL (last _type: "usage" record)
-        usage_data = _extract_usage_from_jsonl(session_key)
+        # Get usage data extracted from stderr
+        usage_data = task.get('_usage')
         if usage_data:
             task['usage'] = usage_data
 

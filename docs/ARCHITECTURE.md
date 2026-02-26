@@ -995,7 +995,7 @@ nanobot 的 LLM Provider 层返回 `usage` 数据（prompt_tokens, completion_to
 3. **职责混乱** — session JSONL 是对话记录，usage 是运营数据，不应耦合
 4. **扩展性弱** — 后续的"按天统计"、"费用计算"、"模型对比"等需求无法高效支持
 
-**v2.2 新方案**：引入 SQLite 独立数据库，usage 数据由 Gateway 层写入，nanobot 核心不做改动。
+**v2.2 新方案**：引入 SQLite 独立数据库，usage 数据由 Gateway 层写入。nanobot 核心仅累计 usage 并输出到 stderr，不写入 JSONL。
 
 ### 13.2 数据流设计（新方案）
 
@@ -1004,25 +1004,22 @@ LiteLLM Provider
   └─ LLMResponse.usage = { prompt_tokens, completion_tokens, total_tokens }
        │
 Agent Loop (_run_agent_loop)
-  └─ 每次 provider.chat() 后累计 usage（local 分支已有）
-  └─ 返回 accumulated_usage
-       │
-_process_message
-  └─ 将 usage 保存到 session JSONL（_type: "usage" 记录）
-  └─ ⚠️ 这一步将在回退 nanobot 核心改动后移除
+  └─ 每次 provider.chat() 后累计 usage（local 分支）
+  └─ 循环结束后，将 usage JSON 输出到 stderr（标记 __usage__: true）
+  └─ 不写入 session JSONL
        │
 Worker (worker.py)
-  └─ nanobot 子进程的 stdout 中包含 usage 信息
-  └─ 任务完成后，从 session JSONL 末尾提取 _type: "usage" 记录
-  └─ 通过 /execute-stream SSE done 事件或 task status 返回 usage
+  └─ 在独立线程中读取 nanobot 子进程的 stderr
+  └─ 解析包含 __usage__: true 的 JSON 行，提取 usage 数据
+  └─ 通过 /execute-stream SSE done 事件返回 usage
        │
 Gateway (gateway.py)
   └─ 收到 Worker 返回的 usage 数据后，写入 SQLite
   └─ GET /api/usage — 从 SQLite 查询，毫秒级响应
        │
 Frontend
-  └─ Sidebar 底部 UsageIndicator（当前 session / 全局）
-  └─ 未来：独立的 Usage 分析页面
+  └─ Sidebar 底部 UsageIndicator（全局用量）
+  └─ 未来：当前 session 用量 + 独立的 Usage 分析页面
 ```
 
 ### 13.3 SQLite 数据库设计
@@ -1061,57 +1058,57 @@ CREATE INDEX idx_usage_finished   ON token_usage(finished_at);
 CREATE INDEX idx_usage_model      ON token_usage(model);
 ```
 
-#### 与 JSONL 记录的对应关系
+#### 数据来源
 
-每条 `_type: "usage"` JSONL 记录 → SQLite `token_usage` 表的一行：
+Usage 数据**不再**存储在 session JSONL 中。数据流：
 
 ```
-JSONL 字段                          SQLite 列            说明
+nanobot stderr JSON → Worker 解析 → SSE done 事件 → Gateway → SQLite
+```
+
+Worker 从 nanobot 子进程的 stderr 中解析 `__usage__: true` JSON 行，字段映射：
+
+```
+stderr JSON 字段                    SQLite 列            说明
 ─────────────────────────────────   ──────────────────   ──────────────
-(隐含：所在文件名)                   session_key          从文件名推导，如 cli_webchat.jsonl → cli:webchat
+(Worker 补充 session_key)            session_key          Worker 传入
 "model": "claude-opus-4-6"         model                直接映射
 "prompt_tokens": 334191            prompt_tokens        直接映射
 "completion_tokens": 4075          completion_tokens    直接映射
 "total_tokens": 338266             total_tokens         直接映射
 "llm_calls": 18                    llm_calls            直接映射
-"timestamp": "2026-02-26T..."      finished_at          旧记录只有一个 timestamp，迁移时 started_at = finished_at
-(无)                                started_at           新方案新增字段
-(无)                                id                   自增主键
+"started_at": "2026-02-26T..."     started_at           agent loop 开始时间
+"finished_at": "2026-02-26T..."    finished_at          agent loop 结束时间
+(自增)                              id                   自增主键
 ```
-
-**时间区间匹配**：`started_at` 和 `finished_at` 构成时间区间，可与 JSONL 中的 user 消息 timestamp 进行关联：
-- user 消息的 timestamp ≈ `started_at`（用户发送时间）
-- assistant 最终回复的 timestamp ≈ `finished_at`（回复完成时间）
 
 ### 13.4 nanobot 核心改动
 
-**目标**：在 `_run_agent_loop` 中记录 `started_at` 时间戳，`_save_usage` 中同时写入 `started_at` 和 `finished_at`。
+**目标**：在 `_run_agent_loop` 中累计 usage，循环结束后输出到 stderr（JSON 行，标记 `__usage__: true`）。不写入 session JSONL。
 
-**agent/loop.py 改动**：
+**agent/loop.py 改动（local 分支）**：
 ```python
-# _run_agent_loop 入口处记录开始时间
+# _run_agent_loop: 累计 usage，循环结束后输出到 stderr
 async def _run_agent_loop(self, ...):
     from datetime import datetime
     loop_started_at = datetime.now().isoformat()
-    # ... 现有逻辑 ...
-    return final_content, tools_used, messages, accumulated_usage, loop_started_at
+    accumulated_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "llm_calls": 0}
+    # ... 每次 provider.chat() 后累计 usage ...
+    
+    # 循环结束后，输出 usage JSON 到 stderr（供 worker 解析）
+    if accumulated_usage["llm_calls"] > 0:
+        usage_record = {"__usage__": True, "model": self.model, ...}
+        print(json.dumps(usage_record), file=sys.stderr)
+    
+    return final_content, tools_used, messages  # 不再返回 usage
 
-# _save_usage 增加 started_at 参数
-def _save_usage(self, session, usage, started_at):
-    record = {
-        "_type": "usage",
-        "model": self.model,
-        "prompt_tokens": usage.get("prompt_tokens", 0),
-        "completion_tokens": usage.get("completion_tokens", 0),
-        "total_tokens": usage.get("total_tokens", 0),
-        "llm_calls": usage.get("llm_calls", 0),
-        "started_at": started_at,
-        "finished_at": datetime.now().isoformat(),
-    }
-    session.messages.append(record)
+# _save_usage 已移除 — 不再写入 session JSONL
 ```
 
-**后续计划**：当 Gateway 层的 SQLite 写入稳定后，可以考虑从 nanobot 核心移除 `_save_usage`，改为 Gateway 直接从 Worker 返回的数据中写入 SQLite。但短期内保留 JSONL 中的 usage 记录作为数据源和备份。
+**关键设计**：
+- usage 通过 stderr JSON 行传递（标记 `__usage__: true`），不污染 session JSONL
+- Worker 在独立线程中读取 stderr，解析 usage JSON
+- `add_assistant_message` bug fix 保留（确保最终回复写入 JSONL）
 
 ### 13.5 Gateway 层 — analytics 模块
 
