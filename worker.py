@@ -24,6 +24,8 @@ import threading
 import time
 from datetime import datetime
 
+SESSIONS_DIR = os.path.expanduser('~/.nanobot/workspace/sessions')
+
 PORT = 8082
 for i, arg in enumerate(sys.argv):
     if arg == '--port' and i + 1 < len(sys.argv):
@@ -61,6 +63,41 @@ def _cleanup_old_tasks():
                    and now - v.get('_finished_ts', 0) > TASK_TTL]
         for k in expired:
             del _tasks[k]
+
+
+def _extract_usage_from_jsonl(session_key):
+    """Read the last _type: 'usage' record from a session's JSONL file."""
+    # Convert session_key to filename: cli:direct → cli_direct.jsonl
+    filename = session_key.replace(':', '_') + '.jsonl'
+    filepath = os.path.join(SESSIONS_DIR, filename)
+    if not os.path.isfile(filepath):
+        return None
+    try:
+        last_usage = None
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get('_type') == 'usage':
+                    last_usage = {
+                        'session_key': session_key,
+                        'model': obj.get('model', 'unknown'),
+                        'prompt_tokens': obj.get('prompt_tokens', 0),
+                        'completion_tokens': obj.get('completion_tokens', 0),
+                        'total_tokens': obj.get('total_tokens', 0),
+                        'llm_calls': obj.get('llm_calls', 0),
+                        'started_at': obj.get('started_at', obj.get('timestamp', '')),
+                        'finished_at': obj.get('finished_at', obj.get('timestamp', '')),
+                    }
+        return last_usage
+    except Exception as e:
+        logger.error(f"Failed to extract usage from {filepath}: {e}")
+        return None
 
 
 def _run_task_background(session_key, message):
@@ -146,12 +183,20 @@ def _run_task_background(session_key, message):
         task['finished_at'] = datetime.now().isoformat()
         task['_finished_ts'] = time.time()
 
+        # Extract usage from JSONL (last _type: "usage" record)
+        usage_data = _extract_usage_from_jsonl(session_key)
+        if usage_data:
+            task['usage'] = usage_data
+
         # Notify SSE clients of completion
         with task['_sse_lock']:
             for sse_fn in task['_sse_clients']:
                 try:
                     if task['status'] == 'done':
-                        sse_fn('done', {'success': True})
+                        done_payload = {'success': True}
+                        if usage_data:
+                            done_payload['usage'] = usage_data
+                        sse_fn('done', done_payload)
                     else:
                         sse_fn('error', {'message': task.get('error', 'Unknown error')})
                 except Exception:

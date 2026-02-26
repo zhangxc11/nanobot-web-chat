@@ -37,6 +37,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(SCRIPT_DIR, 'frontend', 'dist')
 LOG_FILE = '/tmp/nanobot-gateway.log'
 
+# Analytics DB (SQLite)
+from analytics import AnalyticsDB
+analytics_db = AnalyticsDB()  # ~/.nanobot/workspace/analytics.db
+
 # Find builtin skills directory
 BUILTIN_SKILLS_DIR = None
 try:
@@ -543,117 +547,59 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
     # ── Usage API handler ──
 
     def _handle_get_usage(self):
-        """GET /api/usage — aggregate token usage across all sessions."""
-        totals = {
-            'total_prompt_tokens': 0,
-            'total_completion_tokens': 0,
-            'total_tokens': 0,
-            'total_llm_calls': 0,
-        }
-        by_model = {}  # model -> {prompt_tokens, completion_tokens, total_tokens, llm_calls}
-        by_session = []  # [{session_id, summary, total_tokens, llm_calls, last_used}]
+        """GET /api/usage — aggregate token usage from SQLite analytics DB."""
+        try:
+            result = analytics_db.get_global_usage()
 
-        if not os.path.isdir(SESSIONS_DIR):
-            self._send_json({**totals, 'by_model': by_model, 'by_session': by_session})
-            return
+            # Enrich by_session with summary names from JSONL metadata
+            for session_entry in result.get('by_session', []):
+                session_id = session_entry['session_id']
+                # Convert session_key to filename: cli:direct → cli_direct.jsonl
+                filename = session_id.replace(':', '_') + '.jsonl'
+                filepath = os.path.join(SESSIONS_DIR, filename)
+                summary = session_id
+                if os.path.isfile(filepath):
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            first_user_content = ''
+                            for line in f:
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    obj = json.loads(line)
+                                except json.JSONDecodeError:
+                                    continue
+                                if obj.get('_type') == 'metadata':
+                                    summary = (
+                                        obj.get('custom_name')
+                                        or (obj.get('metadata') or {}).get('custom_name')
+                                        or ''
+                                    )
+                                    if summary:
+                                        break
+                                    continue
+                                if obj.get('role') == 'user' and not first_user_content:
+                                    content = obj.get('content', '')
+                                    content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
+                                    first_user_content = content[:80] if content else ''
+                            if not summary:
+                                summary = first_user_content or session_id
+                    except Exception:
+                        pass
+                session_entry['summary'] = summary
 
-        for filepath in glob.glob(os.path.join(SESSIONS_DIR, '*.jsonl')):
-            session_id = os.path.basename(filepath).replace('.jsonl', '')
-            session_totals = {
-                'prompt_tokens': 0,
-                'completion_tokens': 0,
+            self._send_json(result)
+        except Exception as e:
+            logger.error(f"Failed to get usage from analytics DB: {e}")
+            self._send_json({
+                'total_prompt_tokens': 0,
+                'total_completion_tokens': 0,
                 'total_tokens': 0,
-                'llm_calls': 0,
-            }
-            session_summary = session_id
-            last_used = ''
-
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    first_user_content = ''
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            obj = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-
-                        if obj.get('_type') == 'metadata':
-                            session_summary = (
-                                obj.get('custom_name')
-                                or (obj.get('metadata') or {}).get('custom_name')
-                                or ''
-                            )
-                            continue
-
-                        if obj.get('_type') == 'usage':
-                            pt = obj.get('prompt_tokens', 0)
-                            ct = obj.get('completion_tokens', 0)
-                            tt = obj.get('total_tokens', 0)
-                            lc = obj.get('llm_calls', 0)
-                            model = obj.get('model', 'unknown')
-                            ts = obj.get('timestamp', '')
-
-                            session_totals['prompt_tokens'] += pt
-                            session_totals['completion_tokens'] += ct
-                            session_totals['total_tokens'] += tt
-                            session_totals['llm_calls'] += lc
-
-                            totals['total_prompt_tokens'] += pt
-                            totals['total_completion_tokens'] += ct
-                            totals['total_tokens'] += tt
-                            totals['total_llm_calls'] += lc
-
-                            if model not in by_model:
-                                by_model[model] = {
-                                    'prompt_tokens': 0,
-                                    'completion_tokens': 0,
-                                    'total_tokens': 0,
-                                    'llm_calls': 0,
-                                }
-                            by_model[model]['prompt_tokens'] += pt
-                            by_model[model]['completion_tokens'] += ct
-                            by_model[model]['total_tokens'] += tt
-                            by_model[model]['llm_calls'] += lc
-
-                            if ts > last_used:
-                                last_used = ts
-                            continue
-
-                        # Get first user content for summary fallback
-                        if obj.get('role') == 'user' and not first_user_content:
-                            content = obj.get('content', '')
-                            content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
-                            first_user_content = content[:80] if content else ''
-
-                    if not session_summary:
-                        session_summary = first_user_content or session_id
-
-            except Exception as e:
-                logger.error(f"Failed to read usage from {session_id}: {e}")
-                continue
-
-            if session_totals['llm_calls'] > 0:
-                by_session.append({
-                    'session_id': session_id,
-                    'summary': session_summary,
-                    'total_tokens': session_totals['total_tokens'],
-                    'prompt_tokens': session_totals['prompt_tokens'],
-                    'completion_tokens': session_totals['completion_tokens'],
-                    'llm_calls': session_totals['llm_calls'],
-                    'last_used': last_used,
-                })
-
-        # Sort sessions by total_tokens descending
-        by_session.sort(key=lambda s: s['total_tokens'], reverse=True)
-
-        self._send_json({
-            **totals,
-            'by_model': by_model,
-            'by_session': by_session,
-        })
+                'total_llm_calls': 0,
+                'by_model': {},
+                'by_session': [],
+            })
 
     # ── Skills API handlers ──
 
@@ -939,13 +885,42 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
 
             # Stream worker's SSE response line by line
             with urllib.request.urlopen(req, timeout=330) as resp:
+                current_event = ''
+                current_data = ''
                 while True:
                     line = resp.readline()
                     if not line:
                         break
                     self.wfile.write(line)
-                    # Flush after each blank line (SSE event boundary)
-                    if line.strip() == b'':
+
+                    # Parse SSE events to extract usage from 'done' event
+                    decoded = line.decode('utf-8', errors='replace').rstrip('\n')
+                    if decoded.startswith('event: '):
+                        current_event = decoded[7:].strip()
+                    elif decoded.startswith('data: '):
+                        current_data = decoded[6:]
+                    elif decoded == '':
+                        # Event boundary — process and flush
+                        if current_event == 'done' and current_data:
+                            try:
+                                done_payload = json.loads(current_data)
+                                usage = done_payload.get('usage')
+                                if usage and usage.get('session_key'):
+                                    analytics_db.record_usage(
+                                        session_key=usage['session_key'],
+                                        model=usage.get('model', 'unknown'),
+                                        prompt_tokens=usage.get('prompt_tokens', 0),
+                                        completion_tokens=usage.get('completion_tokens', 0),
+                                        total_tokens=usage.get('total_tokens', 0),
+                                        llm_calls=usage.get('llm_calls', 0),
+                                        started_at=usage.get('started_at', ''),
+                                        finished_at=usage.get('finished_at', ''),
+                                    )
+                                    logger.info(f"Recorded usage for {usage['session_key']}: {usage.get('total_tokens', 0)} tokens")
+                            except Exception as e:
+                                logger.error(f"Failed to record usage from done event: {e}")
+                        current_event = ''
+                        current_data = ''
                         self.wfile.flush()
 
             logger.info(f"SSE stream completed for session {session_id}")

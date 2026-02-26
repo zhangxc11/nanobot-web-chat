@@ -981,65 +981,200 @@ App
 
 ---
 
-## 十三、Token 用量统计 (v2.2)
+## 十三、Token 用量统计 — SQLite 独立存储 (v2.2)
 
-### 13.1 问题描述
+### 13.1 问题描述与设计演进
 
-nanobot 的 LLM Provider 层已经返回 `usage` 数据（prompt_tokens, completion_tokens, total_tokens），但 agent loop 中未累计、未保存，前端没有展示。
+nanobot 的 LLM Provider 层返回 `usage` 数据（prompt_tokens, completion_tokens, total_tokens）。
 
-### 13.2 数据流设计
+**v2.2 初版**（已废弃）：在 nanobot 核心 `agent/loop.py` 中累计 usage，保存为 session JSONL 中的 `_type: "usage"` 记录，Gateway 遍历所有 JSONL 文件聚合查询。
+
+**v2.2 初版的问题**：
+1. **与 nanobot 上游不兼容** — `local` 分支的 `_save_usage` 改动增加了与 `main` 分支 merge 的难度
+2. **查询效率差** — 统计"今天总用量"需遍历所有 JSONL 文件的每一行
+3. **职责混乱** — session JSONL 是对话记录，usage 是运营数据，不应耦合
+4. **扩展性弱** — 后续的"按天统计"、"费用计算"、"模型对比"等需求无法高效支持
+
+**v2.2 新方案**：引入 SQLite 独立数据库，usage 数据由 Gateway 层写入，nanobot 核心不做改动。
+
+### 13.2 数据流设计（新方案）
 
 ```
 LiteLLM Provider
   └─ LLMResponse.usage = { prompt_tokens, completion_tokens, total_tokens }
        │
 Agent Loop (_run_agent_loop)
-  └─ 每次 provider.chat() 后累计 usage
+  └─ 每次 provider.chat() 后累计 usage（local 分支已有）
   └─ 返回 accumulated_usage
        │
 _process_message
-  └─ 将 usage 保存到 session JSONL（作为 _type: "usage" 记录）
+  └─ 将 usage 保存到 session JSONL（_type: "usage" 记录）
+  └─ ⚠️ 这一步将在回退 nanobot 核心改动后移除
        │
-Session JSONL
-  └─ { "_type": "usage", "model": "...", "prompt_tokens": N, "completion_tokens": N, "total_tokens": N, "llm_calls": N, "timestamp": "..." }
+Worker (worker.py)
+  └─ nanobot 子进程的 stdout 中包含 usage 信息
+  └─ 任务完成后，从 session JSONL 末尾提取 _type: "usage" 记录
+  └─ 通过 /execute-stream SSE done 事件或 task status 返回 usage
        │
-Gateway API
-  └─ GET /api/sessions/:id → 返回 session 级别 usage 汇总
-  └─ GET /api/usage → 返回全局 usage 汇总（所有 session 总和）
+Gateway (gateway.py)
+  └─ 收到 Worker 返回的 usage 数据后，写入 SQLite
+  └─ GET /api/usage — 从 SQLite 查询，毫秒级响应
        │
 Frontend
-  └─ 用量展示模块
+  └─ Sidebar 底部 UsageIndicator（当前 session / 全局）
+  └─ 未来：独立的 Usage 分析页面
 ```
 
-### 13.3 nanobot 核心改动
+### 13.3 SQLite 数据库设计
 
-**agent/loop.py**：
-- `_run_agent_loop` 中每次 `provider.chat()` 后累计 usage
-- 返回值增加 `usage` 字段
-- `_process_message` 中将 usage 写入 session（新的 `_type: "usage"` JSONL 行）
+**文件位置**：`~/.nanobot/workspace/analytics.db`（生产）
+**测试数据库**：`~/.nanobot/workspace/web-chat/tests/test_analytics.db`（测试，自动创建/销毁）
 
-**Session JSONL 新增记录类型**：
-```jsonl
-{"_type": "usage", "model": "anthropic/claude-sonnet-4-5", "prompt_tokens": 15234, "completion_tokens": 1823, "total_tokens": 17057, "llm_calls": 3, "timestamp": "2026-02-26T13:45:00"}
+#### Schema
+
+```sql
+-- Token 用量表
+-- 每条记录对应一次用户消息的完整处理（一次 _process_message 调用）
+-- 一次处理中可能有多轮 LLM 调用（因工具调用循环），llm_calls 记录总次数
+CREATE TABLE token_usage (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- 归属
+    session_key       TEXT NOT NULL,          -- "cli:direct", "webchat:1772030778"
+
+    -- 用量数据
+    model             TEXT NOT NULL,          -- "claude-opus-4-6"
+    prompt_tokens     INTEGER DEFAULT 0,      -- 输入 tokens（累计）
+    completion_tokens INTEGER DEFAULT 0,      -- 输出 tokens（累计）
+    total_tokens      INTEGER DEFAULT 0,      -- 总 tokens（累计）
+    llm_calls         INTEGER DEFAULT 0,      -- 本次交互的 LLM 调用次数
+
+    -- 时间区间（用于与 JSONL 消息按时间匹配）
+    started_at        TEXT NOT NULL,          -- agent loop 开始时间 (ISO 8601)
+    finished_at       TEXT NOT NULL           -- agent loop 结束时间 (ISO 8601)
+);
+
+-- 索引
+CREATE INDEX idx_usage_session    ON token_usage(session_key);
+CREATE INDEX idx_usage_started    ON token_usage(started_at);
+CREATE INDEX idx_usage_finished   ON token_usage(finished_at);
+CREATE INDEX idx_usage_model      ON token_usage(model);
 ```
 
-### 13.4 Gateway API
+#### 与 JSONL 记录的对应关系
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/sessions/:id` | 返回 session 详情，包含 usage 汇总 |
-| GET | `/api/usage` | 全局 usage 汇总（所有 session） |
+每条 `_type: "usage"` JSONL 记录 → SQLite `token_usage` 表的一行：
 
-**响应格式**：
+```
+JSONL 字段                          SQLite 列            说明
+─────────────────────────────────   ──────────────────   ──────────────
+(隐含：所在文件名)                   session_key          从文件名推导，如 cli_webchat.jsonl → cli:webchat
+"model": "claude-opus-4-6"         model                直接映射
+"prompt_tokens": 334191            prompt_tokens        直接映射
+"completion_tokens": 4075          completion_tokens    直接映射
+"total_tokens": 338266             total_tokens         直接映射
+"llm_calls": 18                    llm_calls            直接映射
+"timestamp": "2026-02-26T..."      finished_at          旧记录只有一个 timestamp，迁移时 started_at = finished_at
+(无)                                started_at           新方案新增字段
+(无)                                id                   自增主键
+```
+
+**时间区间匹配**：`started_at` 和 `finished_at` 构成时间区间，可与 JSONL 中的 user 消息 timestamp 进行关联：
+- user 消息的 timestamp ≈ `started_at`（用户发送时间）
+- assistant 最终回复的 timestamp ≈ `finished_at`（回复完成时间）
+
+### 13.4 nanobot 核心改动
+
+**目标**：在 `_run_agent_loop` 中记录 `started_at` 时间戳，`_save_usage` 中同时写入 `started_at` 和 `finished_at`。
+
+**agent/loop.py 改动**：
+```python
+# _run_agent_loop 入口处记录开始时间
+async def _run_agent_loop(self, ...):
+    from datetime import datetime
+    loop_started_at = datetime.now().isoformat()
+    # ... 现有逻辑 ...
+    return final_content, tools_used, messages, accumulated_usage, loop_started_at
+
+# _save_usage 增加 started_at 参数
+def _save_usage(self, session, usage, started_at):
+    record = {
+        "_type": "usage",
+        "model": self.model,
+        "prompt_tokens": usage.get("prompt_tokens", 0),
+        "completion_tokens": usage.get("completion_tokens", 0),
+        "total_tokens": usage.get("total_tokens", 0),
+        "llm_calls": usage.get("llm_calls", 0),
+        "started_at": started_at,
+        "finished_at": datetime.now().isoformat(),
+    }
+    session.messages.append(record)
+```
+
+**后续计划**：当 Gateway 层的 SQLite 写入稳定后，可以考虑从 nanobot 核心移除 `_save_usage`，改为 Gateway 直接从 Worker 返回的数据中写入 SQLite。但短期内保留 JSONL 中的 usage 记录作为数据源和备份。
+
+### 13.5 Gateway 层 — analytics 模块
+
+新增 `analytics.py` 模块，封装 SQLite 操作：
+
+```python
+# analytics.py — Token 用量数据库管理
+
+import sqlite3
+import os
+
+DEFAULT_DB_PATH = os.path.expanduser("~/.nanobot/workspace/analytics.db")
+
+class AnalyticsDB:
+    def __init__(self, db_path: str = DEFAULT_DB_PATH):
+        self.db_path = db_path
+        self._ensure_schema()
+
+    def _ensure_schema(self):
+        """创建表和索引（如果不存在）。"""
+        ...
+
+    def record_usage(self, session_key, model, prompt_tokens,
+                     completion_tokens, total_tokens, llm_calls,
+                     started_at, finished_at):
+        """写入一条 usage 记录。"""
+        ...
+
+    def get_global_usage(self) -> dict:
+        """全局汇总：总计 + 按模型 + 按 session。"""
+        ...
+
+    def get_session_usage(self, session_key: str) -> dict:
+        """单个 session 的 usage 汇总。"""
+        ...
+
+    def get_daily_usage(self, days: int = 30) -> list:
+        """按天统计最近 N 天的用量。"""
+        ...
+
+    def migrate_from_jsonl(self, sessions_dir: str):
+        """从现有 JSONL 文件迁移 _type: "usage" 记录到 SQLite。"""
+        ...
+```
+
+### 13.6 Gateway API
+
+| 方法 | 路径 | 说明 | 数据源 |
+|------|------|------|--------|
+| GET | `/api/usage` | 全局 usage 汇总 | SQLite |
+| GET | `/api/usage?session=<key>` | 单 session usage | SQLite |
+| GET | `/api/usage/daily?days=30` | 按天统计 | SQLite |
+| POST | `/api/usage/migrate` | 从 JSONL 迁移数据到 SQLite | JSONL → SQLite |
+
+**GET /api/usage 响应格式**（与前端现有 `UsageStats` 类型兼容）：
 ```json
-// GET /api/usage
 {
   "total_prompt_tokens": 1234567,
   "total_completion_tokens": 234567,
   "total_tokens": 1469134,
   "total_llm_calls": 456,
   "by_model": {
-    "anthropic/claude-sonnet-4-5": {
+    "claude-opus-4-6": {
       "prompt_tokens": 800000,
       "completion_tokens": 150000,
       "total_tokens": 950000,
@@ -1049,17 +1184,101 @@ Frontend
   "by_session": [
     {
       "session_id": "webchat_xxx",
+      "summary": "对话名称",
       "total_tokens": 50000,
-      "llm_calls": 10
+      "prompt_tokens": 30000,
+      "completion_tokens": 20000,
+      "llm_calls": 10,
+      "last_used": "2026-02-26T14:30:00"
     }
   ]
 }
 ```
 
-### 13.5 前端展示
+### 13.7 数据写入时机
 
-在 ChatPage 的 sidebar 底部或 header 区域显示当前 session 的 token 用量。
-全局用量可在配置模块或独立的用量页面展示。
+Gateway 在以下时机将 usage 写入 SQLite：
+
+1. **实时写入**（推荐）：Worker 的 `/execute-stream` SSE `done` 事件中携带 usage 数据，Gateway 收到后立即写入
+2. **补偿写入**：Gateway 启动时，扫描 JSONL 中的 `_type: "usage"` 记录，将 SQLite 中缺失的记录补入
+
+**Worker SSE done 事件扩展**：
+```
+event: done
+data: {"usage": {"model": "claude-opus-4-6", "prompt_tokens": 1234, "completion_tokens": 567, "total_tokens": 1801, "llm_calls": 3, "started_at": "...", "finished_at": "..."}}
+```
+
+### 13.8 数据迁移
+
+一次性迁移脚本，将现有 JSONL 中的 `_type: "usage"` 记录导入 SQLite：
+
+```python
+def migrate_from_jsonl(self, sessions_dir):
+    """遍历所有 session JSONL，提取 _type: usage 记录，写入 SQLite。"""
+    for filepath in glob.glob(os.path.join(sessions_dir, '*.jsonl')):
+        session_filename = os.path.basename(filepath).replace('.jsonl', '')
+        # 文件名转 session_key: cli_direct → cli:direct, webchat_xxx → webchat:xxx
+        session_key = session_filename.replace('_', ':', 1)
+        with open(filepath) as f:
+            for line in f:
+                obj = json.loads(line)
+                if obj.get('_type') == 'usage':
+                    self.record_usage(
+                        session_key=session_key,
+                        model=obj['model'],
+                        prompt_tokens=obj.get('prompt_tokens', 0),
+                        completion_tokens=obj.get('completion_tokens', 0),
+                        total_tokens=obj.get('total_tokens', 0),
+                        llm_calls=obj.get('llm_calls', 0),
+                        # 旧记录只有 timestamp，没有 started_at
+                        started_at=obj.get('started_at', obj['timestamp']),
+                        finished_at=obj.get('finished_at', obj['timestamp']),
+                    )
+```
+
+### 13.9 前端展示
+
+**当前实现**：Sidebar 底部 `UsageIndicator` 组件，调用 `GET /api/usage`，显示**全局**用量。
+
+**改进计划**：
+- Sidebar 底部显示**当前 session** 的用量（`GET /api/usage?session=<key>`）
+- 点击展开后显示全局汇总 + 按模型分布
+- 未来：独立的 Usage 分析页面（按天趋势图、费用估算等）
+
+### 13.10 测试策略
+
+**测试文件**：`tests/test_analytics.py`
+
+**测试数据库隔离**：
+- 测试使用独立的 SQLite 文件（`tests/test_analytics.db`），每个测试用例前创建、后销毁
+- 也可使用 `:memory:` 内存数据库加速测试
+- 生产数据库路径通过 `AnalyticsDB(db_path=...)` 参数注入，测试时传入测试路径
+
+**测试用例**：
+1. **Schema 创建**：验证表和索引正确创建
+2. **record_usage**：写入记录，验证字段完整性
+3. **get_global_usage**：多条记录聚合，验证总计、按模型、按 session 分组
+4. **get_session_usage**：单 session 过滤
+5. **get_daily_usage**：按天聚合，验证日期分组和排序
+6. **migrate_from_jsonl**：从测试 JSONL 文件迁移，验证记录数和字段映射
+7. **幂等迁移**：重复迁移不产生重复记录
+8. **空数据库查询**：无记录时返回零值，不报错
+9. **并发写入**：模拟多线程写入，验证 SQLite WAL 模式下无锁冲突
+
+**测试文档**：`tests/README.md` 记录测试结构、运行方式、注意事项
+
+### 13.11 实施计划
+
+| 步骤 | 任务 | 说明 |
+|------|------|------|
+| T13.1 | 创建 `analytics.py` + Schema | AnalyticsDB 类，表创建，基本 CRUD |
+| T13.2 | 编写 `tests/test_analytics.py` | 完整测试用例，验证所有查询方法 |
+| T13.3 | nanobot 核心：`_save_usage` 增加 `started_at` | `_run_agent_loop` 记录开始时间 |
+| T13.4 | 数据迁移：`migrate_from_jsonl` | 从现有 JSONL 导入历史 usage 数据 |
+| T13.5 | Gateway 集成：`_handle_get_usage` 改用 SQLite | 替换原有的 JSONL 遍历逻辑 |
+| T13.6 | Worker SSE done 事件携带 usage | Gateway 收到后实时写入 SQLite |
+| T13.7 | 前端：UsageIndicator 支持当前 session 用量 | 可选，后续迭代 |
+| T13.8 | 测试文档 `tests/README.md` | 记录测试结构和运行方式 |
 
 ---
 

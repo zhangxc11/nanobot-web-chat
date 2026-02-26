@@ -1,0 +1,466 @@
+"""
+test_analytics.py — Tests for AnalyticsDB (token usage SQLite storage).
+
+All tests use in-memory SQLite databases (:memory:) for isolation.
+No production data is touched.
+
+Run: cd web-chat && python3 -m pytest tests/ -v
+"""
+
+import json
+import os
+import tempfile
+
+import pytest
+
+# Add parent dir to path so we can import analytics
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from analytics import AnalyticsDB
+
+
+# ── Fixtures ──
+
+@pytest.fixture
+def db():
+    """Fresh in-memory AnalyticsDB for each test."""
+    return AnalyticsDB(db_path=":memory:")
+
+
+@pytest.fixture
+def populated_db(db):
+    """DB with sample data for query tests."""
+    # Session 1: cli:direct — 2 interactions with claude-opus-4-6
+    db.record_usage(
+        session_key="cli:direct",
+        model="claude-opus-4-6",
+        prompt_tokens=10000,
+        completion_tokens=2000,
+        total_tokens=12000,
+        llm_calls=3,
+        started_at="2026-02-25T10:00:00",
+        finished_at="2026-02-25T10:01:30",
+    )
+    db.record_usage(
+        session_key="cli:direct",
+        model="claude-opus-4-6",
+        prompt_tokens=15000,
+        completion_tokens=3000,
+        total_tokens=18000,
+        llm_calls=5,
+        started_at="2026-02-25T14:00:00",
+        finished_at="2026-02-25T14:02:00",
+    )
+
+    # Session 2: webchat:123 — 1 interaction with claude-sonnet
+    db.record_usage(
+        session_key="webchat:123",
+        model="claude-sonnet-4-20250514",
+        prompt_tokens=5000,
+        completion_tokens=1000,
+        total_tokens=6000,
+        llm_calls=2,
+        started_at="2026-02-26T09:00:00",
+        finished_at="2026-02-26T09:00:45",
+    )
+
+    # Session 3: webchat:456 — 1 interaction with claude-opus-4-6 (different day)
+    db.record_usage(
+        session_key="webchat:456",
+        model="claude-opus-4-6",
+        prompt_tokens=20000,
+        completion_tokens=4000,
+        total_tokens=24000,
+        llm_calls=8,
+        started_at="2026-02-26T15:00:00",
+        finished_at="2026-02-26T15:03:00",
+    )
+
+    return db
+
+
+# ── Schema Tests ──
+
+class TestSchema:
+    def test_creates_table(self, db):
+        """Table and indexes should be created on init."""
+        conn = db._connect()
+        # Check table exists
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='token_usage'"
+        ).fetchone()
+        assert row is not None
+
+    def test_creates_indexes(self, db):
+        """All 4 indexes should exist."""
+        conn = db._connect()
+        indexes = [r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_usage_%'"
+        )]
+        assert set(indexes) == {
+            "idx_usage_session",
+            "idx_usage_started",
+            "idx_usage_finished",
+            "idx_usage_model",
+        }
+
+    def test_idempotent_schema_creation(self):
+        """Creating AnalyticsDB twice on same path should not error."""
+        db1 = AnalyticsDB(db_path=":memory:")
+        # Re-init on same connection won't work for :memory:, but tests the SQL
+        db1._ensure_schema()  # Should not raise
+
+
+# ── Write Tests ──
+
+class TestRecordUsage:
+    def test_insert_returns_id(self, db):
+        row_id = db.record_usage(
+            session_key="test:session",
+            model="test-model",
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            llm_calls=1,
+            started_at="2026-01-01T00:00:00",
+            finished_at="2026-01-01T00:00:30",
+        )
+        assert row_id == 1
+
+    def test_insert_multiple_increments_id(self, db):
+        id1 = db.record_usage("s1", "m1", 100, 50, 150, 1, "2026-01-01T00:00:00", "2026-01-01T00:00:30")
+        id2 = db.record_usage("s2", "m2", 200, 100, 300, 2, "2026-01-01T01:00:00", "2026-01-01T01:01:00")
+        assert id2 == id1 + 1
+
+    def test_fields_stored_correctly(self, db):
+        db.record_usage(
+            session_key="cli:direct",
+            model="claude-opus-4-6",
+            prompt_tokens=12345,
+            completion_tokens=6789,
+            total_tokens=19134,
+            llm_calls=7,
+            started_at="2026-02-26T10:00:00",
+            finished_at="2026-02-26T10:05:00",
+        )
+        conn = db._connect()
+        row = conn.execute("SELECT * FROM token_usage WHERE id = 1").fetchone()
+        assert row["session_key"] == "cli:direct"
+        assert row["model"] == "claude-opus-4-6"
+        assert row["prompt_tokens"] == 12345
+        assert row["completion_tokens"] == 6789
+        assert row["total_tokens"] == 19134
+        assert row["llm_calls"] == 7
+        assert row["started_at"] == "2026-02-26T10:00:00"
+        assert row["finished_at"] == "2026-02-26T10:05:00"
+
+
+# ── Global Usage Tests ──
+
+class TestGetGlobalUsage:
+    def test_empty_db(self, db):
+        result = db.get_global_usage()
+        assert result["total_prompt_tokens"] == 0
+        assert result["total_completion_tokens"] == 0
+        assert result["total_tokens"] == 0
+        assert result["total_llm_calls"] == 0
+        assert result["by_model"] == {}
+        assert result["by_session"] == []
+
+    def test_totals(self, populated_db):
+        result = populated_db.get_global_usage()
+        # 10000+15000+5000+20000 = 50000
+        assert result["total_prompt_tokens"] == 50000
+        # 2000+3000+1000+4000 = 10000
+        assert result["total_completion_tokens"] == 10000
+        # 12000+18000+6000+24000 = 60000
+        assert result["total_tokens"] == 60000
+        # 3+5+2+8 = 18
+        assert result["total_llm_calls"] == 18
+
+    def test_by_model(self, populated_db):
+        result = populated_db.get_global_usage()
+        by_model = result["by_model"]
+        assert len(by_model) == 2
+
+        opus = by_model["claude-opus-4-6"]
+        assert opus["prompt_tokens"] == 45000  # 10000+15000+20000
+        assert opus["completion_tokens"] == 9000  # 2000+3000+4000
+        assert opus["total_tokens"] == 54000  # 12000+18000+24000
+        assert opus["llm_calls"] == 16  # 3+5+8
+
+        sonnet = by_model["claude-sonnet-4-20250514"]
+        assert sonnet["total_tokens"] == 6000
+
+    def test_by_session(self, populated_db):
+        result = populated_db.get_global_usage()
+        by_session = result["by_session"]
+        assert len(by_session) == 3
+
+        # Sorted by total_tokens DESC
+        assert by_session[0]["session_id"] == "cli:direct"
+        assert by_session[0]["total_tokens"] == 30000  # 12000+18000
+        assert by_session[1]["session_id"] == "webchat:456"
+        assert by_session[1]["total_tokens"] == 24000
+        assert by_session[2]["session_id"] == "webchat:123"
+        assert by_session[2]["total_tokens"] == 6000
+
+    def test_by_session_last_used(self, populated_db):
+        result = populated_db.get_global_usage()
+        by_session = result["by_session"]
+        cli_direct = next(s for s in by_session if s["session_id"] == "cli:direct")
+        assert cli_direct["last_used"] == "2026-02-25T14:02:00"
+
+
+# ── Session Usage Tests ──
+
+class TestGetSessionUsage:
+    def test_existing_session(self, populated_db):
+        result = populated_db.get_session_usage("cli:direct")
+        assert result["session_key"] == "cli:direct"
+        assert result["prompt_tokens"] == 25000  # 10000+15000
+        assert result["total_tokens"] == 30000
+        assert result["llm_calls"] == 8  # 3+5
+        assert len(result["records"]) == 2
+        # Records ordered by started_at ASC
+        assert result["records"][0]["started_at"] == "2026-02-25T10:00:00"
+        assert result["records"][1]["started_at"] == "2026-02-25T14:00:00"
+
+    def test_nonexistent_session(self, populated_db):
+        result = populated_db.get_session_usage("nonexistent:session")
+        assert result["total_tokens"] == 0
+        assert result["llm_calls"] == 0
+        assert result["records"] == []
+
+
+# ── Daily Usage Tests ──
+
+class TestGetDailyUsage:
+    def test_daily_aggregation(self, populated_db):
+        result = populated_db.get_daily_usage(days=30)
+        assert len(result) == 2  # 2026-02-25 and 2026-02-26
+
+        day1 = result[0]
+        assert day1["date"] == "2026-02-25"
+        assert day1["total_tokens"] == 30000  # 12000+18000
+        assert day1["llm_calls"] == 8  # 3+5
+
+        day2 = result[1]
+        assert day2["date"] == "2026-02-26"
+        assert day2["total_tokens"] == 30000  # 6000+24000
+        assert day2["llm_calls"] == 10  # 2+8
+
+    def test_empty_db_daily(self, db):
+        result = db.get_daily_usage(days=7)
+        assert result == []
+
+
+# ── Migration Tests ──
+
+class TestMigrateFromJsonl:
+    def _create_test_jsonl(self, tmpdir, filename, records):
+        """Helper to create a test JSONL file."""
+        filepath = os.path.join(tmpdir, filename)
+        with open(filepath, "w") as f:
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+        return filepath
+
+    def test_basic_migration(self, db):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._create_test_jsonl(tmpdir, "cli_direct.jsonl", [
+                {"_type": "metadata", "key": "cli:direct"},
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi"},
+                {
+                    "_type": "usage",
+                    "model": "claude-opus-4-6",
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 200,
+                    "total_tokens": 1200,
+                    "llm_calls": 2,
+                    "timestamp": "2026-02-26T10:00:00",
+                },
+            ])
+
+            stats = db.migrate_from_jsonl(tmpdir)
+            assert stats["migrated"] == 1
+            assert stats["skipped"] == 0
+            assert stats["errors"] == 0
+
+            result = db.get_global_usage()
+            assert result["total_tokens"] == 1200
+            assert result["by_session"][0]["session_id"] == "cli:direct"
+
+    def test_migration_with_started_at(self, db):
+        """New-format records with started_at/finished_at should be preserved."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._create_test_jsonl(tmpdir, "webchat_123.jsonl", [
+                {"_type": "metadata", "key": "webchat:123"},
+                {
+                    "_type": "usage",
+                    "model": "claude-opus-4-6",
+                    "prompt_tokens": 5000,
+                    "completion_tokens": 500,
+                    "total_tokens": 5500,
+                    "llm_calls": 3,
+                    "started_at": "2026-02-26T10:00:00",
+                    "finished_at": "2026-02-26T10:02:00",
+                },
+            ])
+
+            db.migrate_from_jsonl(tmpdir)
+            result = db.get_session_usage("webchat:123")
+            assert len(result["records"]) == 1
+            assert result["records"][0]["started_at"] == "2026-02-26T10:00:00"
+            assert result["records"][0]["finished_at"] == "2026-02-26T10:02:00"
+
+    def test_old_format_fallback(self, db):
+        """Old records with only 'timestamp' should use it for both started_at and finished_at."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._create_test_jsonl(tmpdir, "cli_direct.jsonl", [
+                {
+                    "_type": "usage",
+                    "model": "claude-opus-4-6",
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 200,
+                    "total_tokens": 1200,
+                    "llm_calls": 2,
+                    "timestamp": "2026-02-25T14:00:00",
+                },
+            ])
+
+            db.migrate_from_jsonl(tmpdir)
+            result = db.get_session_usage("cli:direct")
+            rec = result["records"][0]
+            assert rec["started_at"] == "2026-02-25T14:00:00"
+            assert rec["finished_at"] == "2026-02-25T14:00:00"
+
+    def test_idempotent_migration(self, db):
+        """Running migration twice should not create duplicate records."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._create_test_jsonl(tmpdir, "cli_direct.jsonl", [
+                {
+                    "_type": "usage",
+                    "model": "claude-opus-4-6",
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 200,
+                    "total_tokens": 1200,
+                    "llm_calls": 2,
+                    "timestamp": "2026-02-26T10:00:00",
+                },
+            ])
+
+            stats1 = db.migrate_from_jsonl(tmpdir)
+            assert stats1["migrated"] == 1
+
+            stats2 = db.migrate_from_jsonl(tmpdir)
+            assert stats2["migrated"] == 0
+            assert stats2["skipped"] == 1
+
+            result = db.get_global_usage()
+            assert result["total_llm_calls"] == 2  # Not doubled
+
+    def test_multiple_sessions(self, db):
+        """Migration handles multiple JSONL files correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._create_test_jsonl(tmpdir, "cli_direct.jsonl", [
+                {
+                    "_type": "usage", "model": "m1",
+                    "prompt_tokens": 100, "completion_tokens": 50,
+                    "total_tokens": 150, "llm_calls": 1,
+                    "timestamp": "2026-02-26T10:00:00",
+                },
+            ])
+            self._create_test_jsonl(tmpdir, "webchat_999.jsonl", [
+                {
+                    "_type": "usage", "model": "m2",
+                    "prompt_tokens": 200, "completion_tokens": 100,
+                    "total_tokens": 300, "llm_calls": 2,
+                    "timestamp": "2026-02-26T11:00:00",
+                },
+                {
+                    "_type": "usage", "model": "m2",
+                    "prompt_tokens": 300, "completion_tokens": 150,
+                    "total_tokens": 450, "llm_calls": 3,
+                    "timestamp": "2026-02-26T12:00:00",
+                },
+            ])
+
+            stats = db.migrate_from_jsonl(tmpdir)
+            assert stats["migrated"] == 3
+
+            result = db.get_global_usage()
+            assert result["total_tokens"] == 900  # 150+300+450
+            assert len(result["by_session"]) == 2
+
+    def test_nonexistent_directory(self, db):
+        stats = db.migrate_from_jsonl("/nonexistent/path")
+        assert stats["migrated"] == 0
+        assert stats["errors"] == 0
+
+    def test_skips_non_usage_records(self, db):
+        """Only _type: 'usage' records should be migrated."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._create_test_jsonl(tmpdir, "cli_direct.jsonl", [
+                {"_type": "metadata", "key": "cli:direct"},
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi"},
+                {"_type": "consolidated", "summary": "some summary"},
+            ])
+
+            stats = db.migrate_from_jsonl(tmpdir)
+            assert stats["migrated"] == 0
+            assert stats["skipped"] == 0
+
+
+# ── Edge Cases ──
+
+class TestEdgeCases:
+    def test_concurrent_writes_same_connection(self, db):
+        """Multiple writes in sequence should all succeed."""
+        for i in range(100):
+            db.record_usage(
+                session_key=f"session:{i % 5}",
+                model="test-model",
+                prompt_tokens=100 * i,
+                completion_tokens=50 * i,
+                total_tokens=150 * i,
+                llm_calls=1,
+                started_at=f"2026-02-26T{i:02d}:00:00",
+                finished_at=f"2026-02-26T{i:02d}:00:30",
+            )
+
+        result = db.get_global_usage()
+        assert result["total_llm_calls"] == 100
+        assert len(result["by_session"]) == 5
+
+    def test_file_based_db(self):
+        """Test with actual file-based SQLite (not :memory:)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            db = AnalyticsDB(db_path=db_path)
+
+            db.record_usage("s1", "m1", 100, 50, 150, 1,
+                           "2026-01-01T00:00:00", "2026-01-01T00:00:30")
+
+            # Re-open to verify persistence
+            db2 = AnalyticsDB(db_path=db_path)
+            result = db2.get_global_usage()
+            assert result["total_tokens"] == 150
+
+    def test_unicode_in_model_name(self, db):
+        """Model names with special characters should work."""
+        db.record_usage("s1", "anthropic/claude-opus-4-6", 100, 50, 150, 1,
+                       "2026-01-01T00:00:00", "2026-01-01T00:00:30")
+        result = db.get_global_usage()
+        assert "anthropic/claude-opus-4-6" in result["by_model"]
+
+    def test_zero_values(self, db):
+        """Records with all zero values should be stored correctly."""
+        db.record_usage("s1", "m1", 0, 0, 0, 0,
+                       "2026-01-01T00:00:00", "2026-01-01T00:00:30")
+        result = db.get_session_usage("s1")
+        assert result["total_tokens"] == 0
+        assert len(result["records"]) == 1

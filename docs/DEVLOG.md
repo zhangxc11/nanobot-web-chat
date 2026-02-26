@@ -27,6 +27,7 @@
 | Phase 16: Bug 修复 — 消息 timestamp 不准确 | ✅ 已完成 | main (nanobot core) |
 | Phase 17: 任务执行体验优化 (Issue #7/#8/#9) | ✅ 已完成 | main |
 | Phase 18: Token 用量统计 (Issue #10) | ✅ 已完成 | nanobot: local 分支, web-chat: main |
+| Phase 19: Token 用量 SQLite 独立存储 | 🔜 进行中 | web-chat: main, nanobot: local |
 
 ---
 
@@ -473,6 +474,54 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 - 每 60 秒自动刷新
 
 #### T18.4 构建 + 测试 + 提交 ✅
+
+---
+
+## Phase 19: Token 用量 — SQLite 独立存储 (Issue #10 续)
+
+### 背景
+Phase 18 将 usage 数据存储在 session JSONL 中（`_type: "usage"` 记录），存在以下问题：
+1. 与 nanobot 上游主分支不兼容（local 分支改动）
+2. 查询效率差（需遍历所有 JSONL）
+3. 职责混乱（对话记录 vs 运营数据）
+4. 扩展性弱（无法支持按天统计、费用计算等）
+
+### 方案
+引入 SQLite (`analytics.db`) 独立存储 usage 数据。详见架构文档 §13。
+
+### 任务拆解
+
+- 🔜 **T19.1** 创建 `analytics.py` — AnalyticsDB 类 + Schema + 基本 CRUD
+  - 文件：`web-chat/analytics.py`
+  - SQLite 路径：`~/.nanobot/workspace/analytics.db`（生产）
+  - 方法：`record_usage`, `get_global_usage`, `get_session_usage`, `get_daily_usage`
+
+- **T19.2** 创建 `tests/test_analytics.py` + `tests/README.md`
+  - 测试数据库隔离：使用 `:memory:` 或临时文件
+  - 测试用例：schema 创建、写入、全局聚合、session 过滤、按天统计、空数据、幂等迁移
+  - 运行：`cd web-chat && python3 -m pytest tests/`
+
+- **T19.3** nanobot 核心：`_save_usage` 增加 `started_at` 字段
+  - `_run_agent_loop` 入口记录 `loop_started_at`
+  - `_save_usage` 写入 `started_at` + `finished_at`（替代原有的 `timestamp`）
+
+- **T19.4** 数据迁移：`migrate_from_jsonl` 方法 + 执行迁移
+  - 从现有 JSONL 提取 `_type: "usage"` 记录导入 SQLite
+  - 旧记录只有 `timestamp`，迁移时 `started_at = finished_at = timestamp`
+  - 幂等：重复执行不产生重复记录
+
+- **T19.5** Gateway 集成：`_handle_get_usage` 改用 SQLite 查询
+  - 替换原有的 JSONL 遍历逻辑
+  - 保持 API 响应格式不变（前端无需改动）
+
+- **T19.6** Worker SSE done 事件携带 usage → Gateway 实时写入 SQLite
+  - Worker 从 JSONL 末尾提取最新 usage 记录
+  - Gateway 收到后写入 SQLite
+
+- **T19.7** 测试文档 `tests/README.md`
+  - 记录测试结构、运行方式、环境隔离策略
+
+- **T19.8** 构建 + 全量测试 + git commit
 
 ---
 
