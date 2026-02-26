@@ -32,6 +32,7 @@
 | Phase 23: exec PIPE 卡死修复 + Usage 刷新 | ✅ 已完成 | web-chat: main, nanobot: local |
 | Phase 24: SDK 化 + 实时持久化 + 统一 Token | ✅ 已完成 | nanobot: local, web-chat: main |
 | Phase 25: 执行过程展示完整性优化 (Issue #24) | ✅ 已完成 | web-chat: main |
+| Phase 26: 工具调用间隙用户消息注入 (Issue #25) | ✅ 已完成 | nanobot: local, web-chat: main |
 
 ---
 
@@ -793,6 +794,56 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 
 ### Git
 - web-chat commit: `6a9621a`, `f8f5428`
+
+---
+
+## Phase 26: 工具调用间隙用户消息注入 (Issue #25) ✅
+
+> 对应需求 §二十 Issue #25 (Backlog #10)
+> 在 agent 执行工具调用循环过程中，用户可在工具调用间隙输入补充信息，影响后续 LLM 决策。
+
+### 实施记录
+
+#### T26.1 nanobot 核心: callbacks + agent loop 集成 ✅
+- `callbacks.py`: 新增 `check_user_input() -> str | None` 方法（Protocol + DefaultCallbacks）
+- `loop.py`: 在工具调用完成后、下一轮 LLM 调用前，调用 `callbacks.check_user_input()`
+  - 有注入文本时构造 `[User interjection during execution]` user 消息
+  - 消息实时持久化到 JSONL + callbacks.on_message 通知 + progress 通知
+- nanobot commit: `94598cb` (feat/user-inject → merged to local)
+
+#### T26.2 Worker: inject 队列 + 端点 ✅
+- Task 字典新增 `_inject_queue: queue.Queue()` — 线程安全消息队列
+- `WorkerCallbacks.check_user_input()`: 非阻塞从队列获取，发送 `user_inject` SSE 事件
+- 新增 `POST /tasks/<session_key>/inject` 端点
+  - 验证任务存在且正在运行 → 消息入队 → 返回 `{"status": "injected"}`
+
+#### T26.3 Gateway: inject 转发路由 ✅
+- 新增 `POST /api/sessions/:id/task-inject` → 转发到 Worker
+
+#### T26.4 前端: API + 输入框双模式 ✅
+- `api.ts`: 新增 `injectMessage(sessionId, message)`
+- `messageStore.ts`: 新增 `injectMessage(content)` action（乐观更新 progressSteps）
+- `ChatInput.tsx`: 重写为双模式
+  - **正常模式**: 发送按钮 → `sendMessage()`
+  - **注入模式** (当前 session 执行中): 📝注入 + ■停止 双按钮
+  - Placeholder: "输入补充信息... (Shift+Enter 注入)"
+- `types/index.ts`: ProgressStep.type 增加 `'user_inject'`
+- `MessageList.tsx` + CSS: `user_inject` 类型渲染（蓝色背景高亮）
+
+### 验证
+- Worker inject 端点: 无任务时返回 `{"status": "unknown"}`，有任务时 `{"status": "injected"}`
+- Gateway → Worker 转发正常
+- 前端 TypeScript + Vite 构建通过
+- 端到端: inject 消息成功入队，在工具调用间隙被 agent loop 消费
+
+### 改动文件
+- nanobot: `agent/callbacks.py`, `agent/loop.py`
+- web-chat: `worker.py`, `gateway.py`
+- 前端: `api.ts`, `messageStore.ts`, `ChatInput.tsx`, `ChatInput.module.css`, `MessageList.tsx`, `MessageList.module.css`, `types/index.ts`
+
+### Git
+- nanobot: `94598cb` (feat/user-inject → local)
+- web-chat: `6fc7c1a` (feat/user-inject → main)
 
 ---
 
