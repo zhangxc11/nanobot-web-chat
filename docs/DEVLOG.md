@@ -30,6 +30,7 @@
 | Phase 19: Token 用量 SQLite 独立存储 | 🔜 进行中 | web-chat: main, nanobot: local |
 | Phase 22: Backlog 1-5 修复 | ✅ 已完成 | web-chat: main, nanobot: local |
 | Phase 23: exec PIPE 卡死修复 + Usage 刷新 | ✅ 已完成 | web-chat: main, nanobot: local |
+| Phase 24: SDK 化 + 实时持久化 + 统一 Token | 🔜 规划中 | 待 nanobot 核心先行 |
 
 ---
 
@@ -672,6 +673,27 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
   - ARCHITECTURE.md: 更新 §8.4, 新增 §8.5 exec 防护, §8.6 daemonize 机制
   - DEVLOG.md: 本记录
   - nanobot 核心: 创建 docs/LOCAL_CHANGES.md
+
+---
+
+## Phase 24: nanobot SDK 化 + 实时持久化 + 统一 Token 记录 (规划中)
+
+> 此 Phase 涉及 nanobot 核心仓库的重大改造，web-chat 侧主要是 Worker 适配。
+> 详细设计见 nanobot 核心仓库 `docs/ARCHITECTURE.md`。
+> 对应 web-chat 需求: §十五(Issue #20)、§十六(Issue #21)、§十七(Issue #22)
+
+### 实施顺序
+
+1. **Phase 1 (nanobot)**: 实时 Session 持久化 — `session/manager.py` + `agent/loop.py`
+   - web-chat 无需改动，自动受益
+2. **Phase 2 (nanobot)**: 统一 Token 记录 — 新增 `usage/recorder.py`
+   - web-chat: gateway.py 移除 usage 写入逻辑
+3. **Phase 3 (nanobot + web-chat)**: SDK 化 — 新增 `sdk/runner.py`
+   - web-chat: worker.py 从 subprocess 改为 SDK 调用
+
+### 当前状态
+
+- 🔜 等待 nanobot 核心 Phase 1 开始实施
 
 ---
 

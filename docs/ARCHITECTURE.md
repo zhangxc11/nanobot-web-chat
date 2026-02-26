@@ -1339,4 +1339,58 @@ def migrate_from_jsonl(self, sessions_dir):
 
 ---
 
+## 十四、架构演进规划 — SDK 化 + 实时持久化 + 统一 Token (v3.0)
+
+> 详细技术设计见 nanobot 核心仓库 `docs/ARCHITECTURE.md` §二。
+> 对应需求: REQUIREMENTS.md §十五(#20)、§十六(#21)、§十七(#22)
+
+### 14.1 演进方向
+
+当前 Worker 通过 CLI 子进程调用 nanobot，存在信息传递不便、解析脆弱、资源浪费等问题。计划分三阶段改造：
+
+```
+Phase 1 (nanobot 核心):
+  Session 实时持久化 — 每条消息立即追加到 JSONL
+  → web-chat 无需改动，自动受益
+
+Phase 2 (nanobot 核心 + web-chat gateway):
+  统一 Token 记录 — 核心层直接写入 SQLite
+  → gateway.py 移除 usage 写入逻辑
+  → analytics.py schema 迁移到 nanobot 核心
+
+Phase 3 (nanobot 核心 + web-chat worker):
+  SDK 化 — Worker 进程内调用 AgentRunner
+  → worker.py 从 subprocess 改为 SDK 调用
+  → 结构化回调替代 stdout/stderr 解析
+```
+
+### 14.2 对 web-chat 的影响
+
+| 组件 | Phase 1 | Phase 2 | Phase 3 |
+|------|---------|---------|---------|
+| gateway.py | 无变化 | 移除 usage 写入 | 无变化 |
+| worker.py | 无变化 | stderr 解析可简化 | **重写**（SDK 调用） |
+| analytics.py | 无变化 | 可能移除（迁移到核心） | — |
+| 前端 | 无变化 | 无变化 | SSE 数据源变更 |
+
+### 14.3 Worker 改造后的架构
+
+```
+改造前:
+  Gateway ──HTTP──→ Worker ──subprocess──→ nanobot CLI
+                     │                        │
+                     ├─ stdout 解析 progress   ├─ stderr JSON → usage
+                     └─ SSE 推送               └─ JSONL 写入
+
+改造后:
+  Gateway ──HTTP──→ Worker ──SDK──→ AgentRunner (进程内)
+                     │                  │
+                     ├─ callbacks        ├─ on_progress → SSE
+                     │  (结构化)         ├─ on_message → 实时 JSONL
+                     │                  ├─ on_usage → SQLite
+                     └─ SSE 推送        └─ on_done → SSE done
+```
+
+---
+
 *本文档将随开发进展持续更新。*

@@ -605,12 +605,101 @@ Shell 中 `&` 的优先级低于 `&&`，导致 `cd /dir && python3 server.py &` 
 
 ---
 
+---
+
+## 十五、nanobot SDK 化 — Worker 直接调用 Agent（原 Backlog #6）
+
+> 2026-02-26 从 Backlog 提升为正式需求。与 §十六、§十七 联合设计。
+> 详细技术设计见 nanobot 核心仓库 `docs/ARCHITECTURE.md` §二。
+
+### Issue #20：Worker 通过 CLI 子进程调用 nanobot 存在多个问题
+
+**现象**：
+1. Worker 通过 `subprocess.Popen(['nanobot', 'agent', ...])` 调用 nanobot
+2. Usage 数据只能通过 stderr JSON 传递，progress 通过 stdout `↳` 前缀行传递
+3. 需要逐行解析 stdout/stderr，解析逻辑脆弱
+4. 无法获取结构化的中间状态
+5. 每次调用启动新 Python 进程，资源浪费
+
+**目标**：
+- nanobot 提供 Python SDK（`nanobot.sdk.AgentRunner`）
+- Worker 在进程内直接调用，通过结构化回调获取 progress/usage/消息
+- 不再需要 subprocess + stdout/stderr 解析
+
+**对 web-chat 的影响**：
+- `worker.py` 从 subprocess 改为 SDK 调用（**破坏性变更**，需 feature 分支）
+- `gateway.py` 的 usage 写入逻辑可简化（核心层已写入 SQLite）
+- `analytics.py` 可能迁移到 nanobot 核心
+
+**实施依赖**：依赖 §十六（实时持久化）和 §十七（统一 token 记录）先完成。
+
+---
+
+## 十六、实时 Session 持久化（原 Backlog #7）
+
+> 2026-02-26 从 Backlog 提升为正式需求。
+> 详细技术设计见 nanobot 核心仓库 `docs/ARCHITECTURE.md` §2.4。
+
+### Issue #21：Agent 执行中途异常退出导致 Session 记录丢失
+
+**现象**：
+1. 用户发送消息，nanobot 开始执行（可能运行数分钟）
+2. 执行过程中进程异常退出（crash/kill/OOM）
+3. 所有中间消息（assistant 回复、tool 调用结果）全部丢失
+4. Session JSONL 中没有任何本次执行的记录
+5. 但文件系统已被修改（工具调用的副作用），导致状态不一致
+
+**根因**：
+- `_save_turn()` 和 `session.save()` 只在 `_process_message()` 末尾调用
+- `_run_agent_loop()` 运行期间所有消息只在内存中
+- 进程退出 = 内存数据丢失
+
+**目标**：
+- 每条消息（user/assistant/tool）在产生时**立即**追加到 JSONL
+- 中途异常退出后，JSONL 中保留已执行的完整记录
+- 不影响现有 JSONL 格式和读取逻辑
+
+**对 web-chat 的影响**：
+- 改动在 nanobot 核心层，web-chat 无需修改
+- Web UI 刷新后可看到中途中断的消息（因为已写入 JSONL）
+
+---
+
+## 十七、统一 Token 用量记录（原 Backlog #8）
+
+> 2026-02-26 从 Backlog 提升为正式需求。
+> 详细技术设计见 nanobot 核心仓库 `docs/ARCHITECTURE.md` §2.5。
+
+### Issue #22：Token 用量记录仅在 Web UI 模式有效
+
+**现象**：
+| 调用方式 | 用量记录 | 原因 |
+|----------|----------|------|
+| Web UI | ✅ 有 | Worker 解析 stderr → Gateway → SQLite |
+| CLI 单次 | ❌ 无 | stderr 输出到终端后丢弃 |
+| CLI 交互 | ❌ 无 | stderr 输出到终端后丢弃 |
+| IM channels | ❌ 无 | 不经过 Worker |
+| Cron 任务 | ❌ 无 | 不经过 Worker |
+
+**目标**：
+- Token 用量在 nanobot 核心层统一写入 SQLite
+- 所有调用方式自动记录，不依赖外部 Worker
+- web-chat 的 UsageIndicator 继续正常工作
+
+**对 web-chat 的影响**：
+- `gateway.py` 移除 usage 写入逻辑（核心层已写入同一 SQLite）
+- `/api/usage` 路由不变（仍查询 SQLite）
+- `analytics.py` 的 schema 迁移到 nanobot 核心
+- Worker 的 stderr usage 解析可简化或移除
+
+---
+
 ### 手动维护的backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
 
-6、【架构改进】现在worker对nanobot的使用，是通过命令行的工具，它本身不是为被worker调用设计的，以至于需要大量使用stdout，stderr的方式来获取信息，比较麻烦，也容易出问题，可以考虑在nanobot中增加一个专门给worker调用的sdk，这样能更便捷的交互。这个修比较重大，而且涉及worker的调整，在命令行触发的条件下执行。
-7、【新需求】在工作过程中，输入用户指令的可能性，比如说用户要补充信息，或者看到当前执行的情况已经不符合预期了，可以在命令行中输入信息，这个时候输入的信息，可以在工具调用的间隙，作为user信息补充插入到对llm的调用过程。对于这个需求，尝试分析实现的可能性和风险。如果可以，尝试实现并试用，有效，就可以作为正式的功能。由于这个功能有一定的探索性，对web和nanobot都有影响，单独在一个工作过程实现，实现过程中，在两个仓库都需要单独的分支，ok了在合并回主分支。
-8、【新需求】目前的worker没有考虑并发支持，所以在前端限制了只有一个session可以发起命令。尝试给worker增加并发支持，增加好之后，前端在session的限制可以打开，每个session可以独立同时提交任务。这个涉及worker修改，也需要独立在一次交互任务中实现。
+9、【新需求】前端展示，目前执行任务过程中，前端展示的内容是截断的，命令行执行过程中的输出比较完整，希望webUI的执行过程，展示内容跟命令行UI一致。当然，执行完成之后，web UI上跟目前的实现一样折叠起来。
+10、【新需求】在工作过程中，输入用户指令的可能性，比如说用户要补充信息，或者看到当前执行的情况已经不符合预期了，可以在命令行中输入信息，这个时候输入的信息，可以在工具调用的间隙，作为user信息补充插入到对llm的调用过程。对于这个需求，尝试分析实现的可能性和风险。如果可以，尝试实现并试用，有效，就可以作为正式的功能。由于这个功能有一定的探索性，对web和nanobot都有影响，单独在一个工作过程实现，实现过程中，在两个仓库都需要单独的分支，ok了在合并回主分支。
+11、【新需求】目前的worker没有考虑并发支持，所以在前端限制了只有一个session可以发起命令。尝试给worker增加并发支持，增加好之后，前端在session的限制可以打开，每个session可以独立同时提交任务。这个涉及worker修改，也需要独立在一次交互任务中实现。
 
 *本文档将随需求迭代持续更新。*
