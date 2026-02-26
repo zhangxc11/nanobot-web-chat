@@ -4,6 +4,7 @@ import styles from './TabBar.module.css';
 
 const tabs: { key: TabKey; label: string; icon: string }[] = [
   { key: 'chat', label: '对话', icon: '💬' },
+  { key: 'usage', label: '用量', icon: '📊' },
   { key: 'config', label: '配置', icon: '⚙️' },
   { key: 'memory', label: '记忆', icon: '🧠' },
   { key: 'skills', label: 'Skill', icon: '🔧' },

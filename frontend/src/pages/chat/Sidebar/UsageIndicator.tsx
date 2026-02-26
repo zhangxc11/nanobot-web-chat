@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSessionStore } from '@/store/sessionStore';
 import * as api from '@/services/api';
 import styles from './Sidebar.module.css';
 
@@ -8,40 +9,63 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+/** Convert frontend session_id (cli_webchat) to session_key (cli:webchat) */
+function toSessionKey(sessionId: string): string {
+  const idx = sessionId.indexOf('_');
+  if (idx > 0) return sessionId.substring(0, idx) + ':' + sessionId.substring(idx + 1);
+  return sessionId;
+}
+
 export default function UsageIndicator() {
-  const [usage, setUsage] = useState<api.UsageStats | null>(null);
+  const { activeSessionId } = useSessionStore();
+  const [usage, setUsage] = useState<api.SessionUsage | null>(null);
   const [expanded, setExpanded] = useState(false);
 
   const loadUsage = useCallback(async () => {
+    if (!activeSessionId) {
+      setUsage(null);
+      return;
+    }
     try {
-      const data = await api.fetchUsage();
+      const key = toSessionKey(activeSessionId);
+      const data = await api.fetchSessionUsage(key);
       setUsage(data);
     } catch {
-      // Silently fail — usage is non-critical
+      setUsage(null);
     }
-  }, []);
+  }, [activeSessionId]);
 
   useEffect(() => {
     loadUsage();
-    // Refresh every 60 seconds
     const timer = setInterval(loadUsage, 60_000);
     return () => clearInterval(timer);
   }, [loadUsage]);
 
-  if (!usage || usage.total_llm_calls === 0) return null;
+  if (!activeSessionId || !usage || usage.llm_calls === 0) return null;
 
-  const modelEntries = Object.entries(usage.by_model);
+  // Group by model from records
+  const byModel: Record<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number; llm_calls: number }> = {};
+  for (const r of usage.records) {
+    if (!byModel[r.model]) {
+      byModel[r.model] = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, llm_calls: 0 };
+    }
+    byModel[r.model].prompt_tokens += r.prompt_tokens;
+    byModel[r.model].completion_tokens += r.completion_tokens;
+    byModel[r.model].total_tokens += r.total_tokens;
+    byModel[r.model].llm_calls += r.llm_calls;
+  }
+  const modelEntries = Object.entries(byModel);
 
   return (
     <div className={styles.usageSection}>
       <button
         className={styles.usageSummary}
         onClick={() => setExpanded(!expanded)}
-        title="Token 用量统计"
+        title="当前对话 Token 用量"
       >
         <span className={styles.usageIcon}>📊</span>
         <span className={styles.usageText}>
-          {formatTokens(usage.total_tokens)} tokens · {usage.total_llm_calls} 次调用
+          {formatTokens(usage.total_tokens)} tokens · {usage.llm_calls} 次调用
         </span>
         <span className={styles.usageToggle}>{expanded ? '▾' : '▸'}</span>
       </button>
@@ -50,11 +74,11 @@ export default function UsageIndicator() {
         <div className={styles.usageDetails}>
           <div className={styles.usageRow}>
             <span className={styles.usageLabel}>输入</span>
-            <span className={styles.usageValue}>{formatTokens(usage.total_prompt_tokens)}</span>
+            <span className={styles.usageValue}>{formatTokens(usage.prompt_tokens)}</span>
           </div>
           <div className={styles.usageRow}>
             <span className={styles.usageLabel}>输出</span>
-            <span className={styles.usageValue}>{formatTokens(usage.total_completion_tokens)}</span>
+            <span className={styles.usageValue}>{formatTokens(usage.completion_tokens)}</span>
           </div>
           <div className={styles.usageRow}>
             <span className={styles.usageLabel}>总计</span>

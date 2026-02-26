@@ -174,10 +174,49 @@ export interface UsageStats {
   by_session: UsageBySession[];
 }
 
+export interface SessionUsage {
+  session_key: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  llm_calls: number;
+  records: Array<{
+    id: number;
+    model: string;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    llm_calls: number;
+    started_at: string;
+    finished_at: string;
+  }>;
+}
+
+export interface DailyUsage {
+  date: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  llm_calls: number;
+}
+
 export async function fetchUsage(): Promise<UsageStats> {
   const res = await fetch(`${API_BASE}/usage`);
   if (!res.ok) throw new Error(`Failed to fetch usage: ${res.status}`);
   return res.json();
+}
+
+export async function fetchSessionUsage(sessionKey: string): Promise<SessionUsage> {
+  const res = await fetch(`${API_BASE}/usage?session=${encodeURIComponent(sessionKey)}`);
+  if (!res.ok) throw new Error(`Failed to fetch session usage: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchDailyUsage(days: number = 30): Promise<DailyUsage[]> {
+  const res = await fetch(`${API_BASE}/usage/daily?days=${days}`);
+  if (!res.ok) throw new Error(`Failed to fetch daily usage: ${res.status}`);
+  const data = await res.json();
+  return data.days;
 }
 
 // ── SSE Streaming ──

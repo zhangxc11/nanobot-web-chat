@@ -149,7 +149,11 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == '/api/usage':
-            self._handle_get_usage()
+            self._handle_get_usage(params)
+            return
+
+        if path == '/api/usage/daily':
+            self._handle_get_daily_usage(params)
             return
 
         if path.startswith('/api/skills/'):
@@ -544,62 +548,90 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             logger.error(f"Failed to read memory file {filename}: {e}")
             self._send_json({'error': str(e)}, 500)
 
-    # ── Usage API handler ──
+    # ── Usage API handlers ──
 
-    def _handle_get_usage(self):
-        """GET /api/usage — aggregate token usage from SQLite analytics DB."""
+    def _handle_get_usage(self, params):
+        """GET /api/usage[?session=<key>] — usage from SQLite analytics DB."""
+        session_key = params.get('session', [None])[0]
         try:
-            result = analytics_db.get_global_usage()
-
-            # Enrich by_session with summary names from JSONL metadata
-            for session_entry in result.get('by_session', []):
-                session_id = session_entry['session_id']
-                # Convert session_key to filename: cli:direct → cli_direct.jsonl
-                filename = session_id.replace(':', '_') + '.jsonl'
-                filepath = os.path.join(SESSIONS_DIR, filename)
-                summary = session_id
-                if os.path.isfile(filepath):
-                    try:
-                        with open(filepath, 'r', encoding='utf-8') as f:
-                            first_user_content = ''
-                            for line in f:
-                                line = line.strip()
-                                if not line:
-                                    continue
-                                try:
-                                    obj = json.loads(line)
-                                except json.JSONDecodeError:
-                                    continue
-                                if obj.get('_type') == 'metadata':
-                                    summary = (
-                                        obj.get('custom_name')
-                                        or (obj.get('metadata') or {}).get('custom_name')
-                                        or ''
-                                    )
-                                    if summary:
-                                        break
-                                    continue
-                                if obj.get('role') == 'user' and not first_user_content:
-                                    content = obj.get('content', '')
-                                    content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
-                                    first_user_content = content[:80] if content else ''
-                            if not summary:
-                                summary = first_user_content or session_id
-                    except Exception:
-                        pass
-                session_entry['summary'] = summary
-
-            self._send_json(result)
+            if session_key:
+                # Per-session usage
+                result = analytics_db.get_session_usage(session_key)
+                self._send_json(result)
+            else:
+                # Global usage
+                result = analytics_db.get_global_usage()
+                self._enrich_session_summaries(result)
+                self._send_json(result)
         except Exception as e:
             logger.error(f"Failed to get usage from analytics DB: {e}")
-            self._send_json({
-                'total_prompt_tokens': 0,
-                'total_completion_tokens': 0,
-                'total_tokens': 0,
-                'total_llm_calls': 0,
-                'by_model': {},
-                'by_session': [],
-            })
+            if session_key:
+                self._send_json({
+                    'session_key': session_key,
+                    'prompt_tokens': 0,
+                    'completion_tokens': 0,
+                    'total_tokens': 0,
+                    'llm_calls': 0,
+                    'records': [],
+                })
+            else:
+                self._send_json({
+                    'total_prompt_tokens': 0,
+                    'total_completion_tokens': 0,
+                    'total_tokens': 0,
+                    'total_llm_calls': 0,
+                    'by_model': {},
+                    'by_session': [],
+                })
+
+    def _handle_get_daily_usage(self, params):
+        """GET /api/usage/daily?days=30 — daily aggregated usage."""
+        try:
+            days = int(params.get('days', ['30'])[0])
+            days = max(1, min(days, 365))  # Clamp to 1-365
+            result = analytics_db.get_daily_usage(days)
+            self._send_json({'days': result})
+        except Exception as e:
+            logger.error(f"Failed to get daily usage: {e}")
+            self._send_json({'days': []})
+
+    def _enrich_session_summaries(self, result):
+        """Enrich by_session entries with human-readable summary names."""
+        for session_entry in result.get('by_session', []):
+            session_id = session_entry['session_id']
+            filename = session_id.replace(':', '_') + '.jsonl'
+            filepath = os.path.join(SESSIONS_DIR, filename)
+            summary = session_id
+            if os.path.isfile(filepath):
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        first_user_content = ''
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                obj = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if obj.get('_type') == 'metadata':
+                                summary = (
+                                    obj.get('custom_name')
+                                    or (obj.get('metadata') or {}).get('custom_name')
+                                    or ''
+                                )
+                                if summary:
+                                    break
+                                continue
+                            if obj.get('role') == 'user' and not first_user_content:
+                                content = obj.get('content', '')
+                                content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
+                                first_user_content = content[:80] if content else ''
+                        if not summary:
+                            summary = first_user_content or session_id
+                except Exception:
+                    pass
+            session_entry['summary'] = summary
 
     # ── Skills API handlers ──
 

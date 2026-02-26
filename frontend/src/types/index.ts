@@ -23,7 +23,7 @@ export interface Message {
   name?: string;
 }
 
-export type TabKey = 'chat' | 'config' | 'memory' | 'skills';
+export type TabKey = 'chat' | 'usage' | 'config' | 'memory' | 'skills';
 
 export interface MessagesResponse {
   messages: Message[];

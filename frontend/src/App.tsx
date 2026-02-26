@@ -1,6 +1,7 @@
 import { useUIStore } from '@/store/uiStore';
 import TabBar from '@/components/TabBar/TabBar';
 import ChatPage from '@/pages/chat/ChatPage';
+import UsagePage from '@/pages/usage/UsagePage';
 import ConfigPage from '@/pages/config/ConfigPage';
 import MemoryPage from '@/pages/memory/MemoryPage';
 import SkillsPage from '@/pages/skills/SkillsPage';
@@ -13,6 +14,8 @@ function App() {
     switch (activeTab) {
       case 'chat':
         return <ChatPage />;
+      case 'usage':
+        return <UsagePage />;
       case 'config':
         return <ConfigPage />;
       case 'memory':
