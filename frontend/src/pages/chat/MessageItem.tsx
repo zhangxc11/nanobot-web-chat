@@ -3,6 +3,18 @@ import type { Message } from '@/types';
 import { MarkdownRenderer } from '@/components/Markdown';
 import styles from './MessageList.module.css';
 
+/** Minimal usage record type (from api.SessionUsage.records) */
+export interface UsageRecord {
+  id: number;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  llm_calls: number;
+  started_at: string;
+  finished_at: string;
+}
+
 interface MessageItemProps {
   message: Message;
 }
@@ -95,8 +107,15 @@ type ProcessItem =
   | { type: 'text'; content: string; key: string }
   | { type: 'tool'; name: string; content: string; args?: string; id: string };
 
+/** Format token count to human-readable string */
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 /** Collapsible group: preceding texts + tool calls */
-function ToolProcessCollapsible({ items, toolCount }: { items: ProcessItem[]; toolCount: number }) {
+function ToolProcessCollapsible({ items, toolCount, usageRecords }: { items: ProcessItem[]; toolCount: number; usageRecords?: UsageRecord[] }) {
   const [expanded, setExpanded] = useState(false);
 
   if (items.length === 0) return null;
@@ -121,6 +140,17 @@ function ToolProcessCollapsible({ items, toolCount }: { items: ProcessItem[]; to
             }
             return <ToolCallLine key={item.id} name={item.name} content={item.content} args={item.args} />;
           })}
+          {usageRecords && usageRecords.length > 0 && (
+            <div className={styles.toolUsageSummary}>
+              <span className={styles.toolUsageIcon}>📊</span>
+              <span className={styles.toolUsageText}>
+                {formatTokens(usageRecords.reduce((sum, r) => sum + r.total_tokens, 0))} tokens
+                {' '}({formatTokens(usageRecords.reduce((sum, r) => sum + r.prompt_tokens, 0))} 输入
+                {' '}/ {formatTokens(usageRecords.reduce((sum, r) => sum + r.completion_tokens, 0))} 输出)
+                {' '}· {usageRecords.reduce((sum, r) => sum + r.llm_calls, 0)} 次调用
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -210,7 +240,7 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
  * Everything else (assistant messages with tool_calls + their content + tool results)
  * goes into the collapsible section.
  */
-export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
+export function AssistantTurnGroup({ messages, usageRecords }: { messages: Message[]; usageRecords?: UsageRecord[] }) {
   // Step 1: Find the "final reply" — last assistant msg without tool_calls that has content
   let finalReplyMsg: Message | null = null;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -274,6 +304,24 @@ export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
     }
   }
 
+  // Step 4: Match usage records to this turn by timestamp overlap
+  // A usage record matches if its [started_at, finished_at] overlaps with the turn's [first, last] timestamp
+  let matchedUsage: UsageRecord[] | undefined;
+  if (usageRecords && usageRecords.length > 0 && toolCount > 0) {
+    const timestamps = messages
+      .map(m => m.timestamp)
+      .filter(Boolean)
+      .sort();
+    if (timestamps.length > 0) {
+      const turnStart = timestamps[0];
+      const turnEnd = timestamps[timestamps.length - 1];
+      matchedUsage = usageRecords.filter(r =>
+        r.started_at <= turnEnd && r.finished_at >= turnStart
+      );
+      if (matchedUsage.length === 0) matchedUsage = undefined;
+    }
+  }
+
   // If nothing to render, skip
   if (processItems.length === 0 && !finalReplyMsg) return null;
 
@@ -285,7 +333,7 @@ export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
       <div className={styles.bubble}>
         <div className={styles.turnContent}>
           {processItems.length > 0 && (
-            <ToolProcessCollapsible items={processItems} toolCount={toolCount} />
+            <ToolProcessCollapsible items={processItems} toolCount={toolCount} usageRecords={matchedUsage} />
           )}
           {finalReplyMsg && (
             <div className={styles.turnTextSegment}>

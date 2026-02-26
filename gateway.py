@@ -606,12 +606,16 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'days': []})
 
     def _enrich_session_summaries(self, result):
-        """Enrich by_session entries with human-readable summary names."""
+        """Enrich by_session entries with human-readable summary names.
+        
+        Also marks sessions whose JSONL file has been deleted with 'deleted': True.
+        """
         for session_entry in result.get('by_session', []):
             session_id = session_entry['session_id']
             filename = session_id.replace(':', '_') + '.jsonl'
             filepath = os.path.join(SESSIONS_DIR, filename)
             summary = session_id
+            deleted = False
             if os.path.isfile(filepath):
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
@@ -641,7 +645,12 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
                             summary = first_user_content or session_id
                 except Exception:
                     pass
+            else:
+                # JSONL file has been deleted — mark as deleted
+                deleted = True
+                summary = f'(已删除) {session_id}'
             session_entry['summary'] = summary
+            session_entry['deleted'] = deleted
 
     # ── Skills API handlers ──
 

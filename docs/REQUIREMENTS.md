@@ -988,8 +988,35 @@ def _create_runner():
 
 ---
 
+## 二十二、迭代反馈 (v3.2)
+
+> 2026-02-27 用量统计增强 + 工具调用用量展示
+
+### Issue #27：已删除 Session 的用量统计显示
+
+**现象**：用量统计页面"按对话"表格中，session JSONL 文件可能被用户手动删除，但 SQLite 中的用量数据仍然保留。删除后这些 session 的用量在统计中仍然显示，但名称无法读取。
+
+**解决方案**：
+- 后端 `_enrich_session_summaries` 检测 JSONL 文件是否存在，不存在则标记 `deleted: true`
+- 前端 UsagePage "按对话"表格中，将已删除的 session 聚合为一行 `🗑️ 已删除对话 (N)`
+- 已删除行显示为灰色斜体样式，与正常 session 区分
+
+### Issue #28：折叠工具调用展开后显示 Token 用量
+
+**现象**：工具调用折叠区域展开后，只能看到工具调用的详情，无法了解这些调用消耗了多少 token。
+
+**解决方案**：
+- 前端 MessageList 获取当前 session 的 usage records
+- 将 usage records 传递给 AssistantTurnGroup → ToolProcessCollapsible
+- 通过消息时间戳与 usage record 的 `[started_at, finished_at]` 时间范围匹配
+- 展开后在底部显示 `📊 XX tokens (XX 输入 / XX 输出) · N 次调用` 摘要
+
+---
+
 ### 手动维护的backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
+
+14、【架构改进】前面两次实现需求的时候，从网页端发起，由于过程中kill worker，导致任务被停止，后续都转换到了cli才成功，请看给一个比较现实的实践建议，避免后续类似的麻烦出现。
 
 *本文档将随需求迭代持续更新。*

@@ -165,17 +165,46 @@ export default function UsagePage() {
                 <span className={styles.colNum}>总计</span>
                 <span className={styles.colNum}>调用</span>
               </div>
-              {globalUsage.by_session.map((s) => (
-                <div key={s.session_id} className={styles.tableRow}>
-                  <span className={styles.colSession} title={s.session_id}>
-                    {s.summary || s.session_id}
-                  </span>
-                  <span className={styles.colNum}>{formatTokens(s.prompt_tokens)}</span>
-                  <span className={styles.colNum}>{formatTokens(s.completion_tokens)}</span>
-                  <span className={styles.colNum}>{formatTokens(s.total_tokens)}</span>
-                  <span className={styles.colNum}>{s.llm_calls}</span>
-                </div>
-              ))}
+              {(() => {
+                const activeSessions = globalUsage.by_session.filter(s => !s.deleted);
+                const deletedSessions = globalUsage.by_session.filter(s => s.deleted);
+                const deletedAgg = deletedSessions.reduce(
+                  (acc, s) => ({
+                    prompt_tokens: acc.prompt_tokens + s.prompt_tokens,
+                    completion_tokens: acc.completion_tokens + s.completion_tokens,
+                    total_tokens: acc.total_tokens + s.total_tokens,
+                    llm_calls: acc.llm_calls + s.llm_calls,
+                  }),
+                  { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, llm_calls: 0 }
+                );
+
+                return (
+                  <>
+                    {activeSessions.map((s) => (
+                      <div key={s.session_id} className={styles.tableRow}>
+                        <span className={styles.colSession} title={s.session_id}>
+                          {s.summary || s.session_id}
+                        </span>
+                        <span className={styles.colNum}>{formatTokens(s.prompt_tokens)}</span>
+                        <span className={styles.colNum}>{formatTokens(s.completion_tokens)}</span>
+                        <span className={styles.colNum}>{formatTokens(s.total_tokens)}</span>
+                        <span className={styles.colNum}>{s.llm_calls}</span>
+                      </div>
+                    ))}
+                    {deletedSessions.length > 0 && (
+                      <div className={`${styles.tableRow} ${styles.deletedRow}`}>
+                        <span className={styles.colSession} title={`${deletedSessions.length} 个已删除对话`}>
+                          🗑️ 已删除对话 ({deletedSessions.length})
+                        </span>
+                        <span className={styles.colNum}>{formatTokens(deletedAgg.prompt_tokens)}</span>
+                        <span className={styles.colNum}>{formatTokens(deletedAgg.completion_tokens)}</span>
+                        <span className={styles.colNum}>{formatTokens(deletedAgg.total_tokens)}</span>
+                        <span className={styles.colNum}>{deletedAgg.llm_calls}</span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}

@@ -304,6 +304,30 @@
   margin-bottom: 0;
 }
 
+/* ── Tool Usage Summary (inside expanded tool calls) ── */
+
+.toolUsageSummary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: rgba(59, 130, 246, 0.08);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid rgba(59, 130, 246, 0.15);
+}
+
+.toolUsageIcon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.toolUsageText {
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Typing Indicator ── */
 
 .retryButton {

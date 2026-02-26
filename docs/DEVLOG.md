@@ -34,6 +34,7 @@
 | Phase 25: 执行过程展示完整性优化 (Issue #24) | ✅ 已完成 | web-chat: main |
 | Phase 26: 工具调用间隙用户消息注入 (Issue #25) | ✅ 已完成 | nanobot: local, web-chat: main |
 | Phase 27: Worker 并发任务支持 (Issue #26) | ✅ 已完成 | web-chat: main |
+| Phase 28: 用量统计增强 + 工具调用用量展示 (Issue #27/#28) | ✅ 已完成 | web-chat: main |
 
 ---
 
@@ -912,6 +913,49 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 - **running_tasks 计数**: SSE 流模式下正确显示 2 个并发任务 ✅
 - **Health 端点**: `mode: sdk-concurrent`, `running_tasks` 实时更新 ✅
 - **同 session 冲突处理**: 第二个任务等待第一个完成后执行 ✅
+
+---
+
+## Phase 28: 用量统计增强 + 工具调用用量展示 (Issue #27/#28) ✅
+
+> 对应需求 §二十二 Issue #27 + Issue #28 (Backlog #12/#13)
+
+### Issue #27: 已删除 Session 的用量统计显示
+
+**问题**: 用量统计"按对话"表格中，已删除 JSONL 的 session 仍显示但名称无法读取。
+
+**解决方案**:
+- 后端 `_enrich_session_summaries`: 检测 JSONL 文件是否存在，不存在标记 `deleted: true`
+- 前端 `api.ts`: `UsageBySession` 接口增加 `deleted?: boolean` 字段
+- 前端 `UsagePage.tsx`: 活跃 session 正常显示，已删除 session 聚合为一行 `🗑️ 已删除对话 (N)`
+- 前端 `UsagePage.module.css`: `.deletedRow` 灰色斜体样式
+
+### Issue #28: 折叠工具调用展开后显示 Token 用量
+
+**问题**: 工具调用折叠展开后只能看到调用详情，不知道消耗了多少 token。
+
+**解决方案**:
+- `MessageList.tsx`: 获取 session usage records，传递给 `AssistantTurnGroup`
+- `MessageItem.tsx`: 
+  - 新增 `UsageRecord` 类型
+  - `AssistantTurnGroup` 接受 `usageRecords` 参数
+  - 通过消息时间戳与 usage record 的 `[started_at, finished_at]` 匹配
+  - `ToolProcessCollapsible` 展开后底部显示 `📊 XX tokens (XX 输入 / XX 输出) · N 次调用`
+- `MessageList.module.css`: `.toolUsageSummary` 蓝色背景摘要样式
+
+### 改动文件
+- `gateway.py` — `_enrich_session_summaries` 增加 deleted 标记
+- `frontend/src/services/api.ts` — `UsageBySession.deleted` 字段
+- `frontend/src/pages/usage/UsagePage.tsx` — 已删除 session 聚合显示
+- `frontend/src/pages/usage/UsagePage.module.css` — `.deletedRow` 样式
+- `frontend/src/pages/chat/MessageList.tsx` — 获取 session usage + 传递给 turn group
+- `frontend/src/pages/chat/MessageItem.tsx` — UsageRecord 类型 + 时间匹配 + 用量展示
+- `frontend/src/pages/chat/MessageList.module.css` — `.toolUsageSummary` 样式
+- `docs/REQUIREMENTS.md` — §二十二 Issue #27/#28 + backlog 更新
+- `docs/DEVLOG.md` — Phase 28 记录
+
+### Git
+- web-chat commit: (pending)
 
 ---
 

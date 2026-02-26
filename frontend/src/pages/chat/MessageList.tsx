@@ -2,6 +2,8 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { useSessionStore } from '@/store/sessionStore';
 import type { ProgressStep } from '@/types';
+import type { SessionUsage } from '@/services/api';
+import * as api from '@/services/api';
 import MessageItem, { groupMessages, AssistantTurnGroup } from './MessageItem';
 import styles from './MessageList.module.css';
 
@@ -120,6 +122,7 @@ export default function MessageList() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [sessionUsage, setSessionUsage] = useState<SessionUsage | null>(null);
 
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const loadMoreMessages = useMessageStore((s) => s.loadMoreMessages);
@@ -140,6 +143,39 @@ export default function MessageList() {
       clearMessages();
     }
   }, [activeSessionId, loadMessages, clearMessages, checkRunningTask]);
+
+  // Fetch session usage for tool call token display
+  useEffect(() => {
+    if (!activeSessionId) {
+      setSessionUsage(null);
+      return;
+    }
+    const key = (() => {
+      const idx = activeSessionId.indexOf('_');
+      if (idx > 0) return activeSessionId.substring(0, idx) + ':' + activeSessionId.substring(idx + 1);
+      return activeSessionId;
+    })();
+
+    let cancelled = false;
+    api.fetchSessionUsage(key).then(data => {
+      if (!cancelled) setSessionUsage(data);
+    }).catch(() => {
+      if (!cancelled) setSessionUsage(null);
+    });
+
+    // Also refresh on usage-updated event
+    const onUsageUpdated = () => {
+      api.fetchSessionUsage(key).then(data => {
+        if (!cancelled) setSessionUsage(data);
+      }).catch(() => {});
+    };
+    window.addEventListener('usage-updated', onUsageUpdated);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('usage-updated', onUsageUpdated);
+    };
+  }, [activeSessionId]);
 
   // Auto-scroll to bottom on initial load or when new messages are appended
   const prevMsgCountRef = useRef(0);
@@ -253,7 +289,7 @@ export default function MessageList() {
             return <MessageItem key={group.messages[0].id} message={group.messages[0]} />;
           }
           // assistant-turn: render compactly
-          return <AssistantTurnGroup key={`turn-${idx}`} messages={group.messages} />;
+          return <AssistantTurnGroup key={`turn-${idx}`} messages={group.messages} usageRecords={sessionUsage?.records} />;
         })}
         {isCurrentSessionSending && <ProgressIndicator steps={progressSteps} recovering={recovering} />}
         {error && messages.length > 0 && (

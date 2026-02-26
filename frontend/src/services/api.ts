@@ -186,6 +186,7 @@ export interface UsageBySession {
   completion_tokens: number;
   llm_calls: number;
   last_used: string;
+  deleted?: boolean;
 }
 
 export interface UsageStats {
