@@ -26,9 +26,12 @@ from datetime import datetime
 
 
 PORT = 8082
+DAEMONIZE = False
 for i, arg in enumerate(sys.argv):
     if arg == '--port' and i + 1 < len(sys.argv):
         PORT = int(sys.argv[i + 1])
+    elif arg == '--daemonize':
+        DAEMONIZE = True
 
 LOG_FILE = '/tmp/nanobot-worker.log'
 
@@ -459,6 +462,8 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         }
         if task['status'] == 'error':
             result['error'] = task.get('error', '')
+        if task.get('usage'):
+            result['usage'] = task['usage']
         self._send_json(result)
 
     def _send_sse(self, event, data):
@@ -478,19 +483,40 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     import socketserver
+
+    if DAEMONIZE:
+        pid = os.fork()
+        if pid > 0:
+            print(f"Worker daemonized (pid={pid})")
+            sys.exit(0)
+        os.setsid()
+        pid2 = os.fork()
+        if pid2 > 0:
+            sys.exit(0)
+        sys.stdin = open(os.devnull, 'r')
+        sys.stdout = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w')
+        devnull_fd = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull_fd, 0)
+        os.dup2(devnull_fd, 1)
+        os.dup2(devnull_fd, 2)
+        os.close(devnull_fd)
+
     class ThreadedWorkerServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         daemon_threads = True
     server = ThreadedWorkerServer(('127.0.0.1', PORT), WorkerHandler)
     logger.info(f"Worker starting on http://localhost:{PORT}")
     logger.info(f"Log file: {LOG_FILE}")
-    print(f"🔧 nanobot Worker running at http://localhost:{PORT}")
-    print(f"   Health: http://localhost:{PORT}/health")
-    print(f"   Log: {LOG_FILE}")
-    print(f"   Endpoints: POST /execute, POST /execute-stream (SSE), GET /tasks/<key>")
-    print(f"   Press Ctrl+C to stop")
+    if not DAEMONIZE:
+        print(f"🔧 nanobot Worker running at http://localhost:{PORT}")
+        print(f"   Health: http://localhost:{PORT}/health")
+        print(f"   Log: {LOG_FILE}")
+        print(f"   Endpoints: POST /execute, POST /execute-stream (SSE), GET /tasks/<key>")
+        print(f"   Press Ctrl+C to stop")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n👋 Worker stopped.")
+        if not DAEMONIZE:
+            print("\n👋 Worker stopped.")
         logger.info("Worker stopped by user")
         server.server_close()

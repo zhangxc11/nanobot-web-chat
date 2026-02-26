@@ -15,12 +15,15 @@ import sys
 import os
 import glob
 import re
+import threading
+import time
 import urllib.parse
 import urllib.request
 import mimetypes
 
 PORT = 8081
 WORKER_URL = 'http://127.0.0.1:8082'
+DAEMONIZE = False
 
 # Parse CLI args
 for i, arg in enumerate(sys.argv):
@@ -28,6 +31,8 @@ for i, arg in enumerate(sys.argv):
         PORT = int(sys.argv[i + 1])
     elif arg == '--worker-url' and i + 1 < len(sys.argv):
         WORKER_URL = sys.argv[i + 1]
+    elif arg == '--daemonize':
+        DAEMONIZE = True
 
 SESSIONS_DIR = os.path.expanduser('~/.nanobot/workspace/sessions')
 MEMORY_DIR = os.path.expanduser('~/.nanobot/workspace/memory')
@@ -847,6 +852,12 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
+
+            # Opportunistic usage recording: if task is done and has usage data,
+            # record it to analytics DB (idempotent — dedup by finished_at + model + tokens).
+            if data.get('status') == 'done' and data.get('usage'):
+                self._try_record_usage(data['usage'])
+
             self._send_json(data)
         except urllib.error.URLError as e:
             logger.error(f"Worker unavailable for task status: {e.reason}")
@@ -937,20 +948,10 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
                             try:
                                 done_payload = json.loads(current_data)
                                 usage = done_payload.get('usage')
-                                if usage and usage.get('session_key'):
-                                    analytics_db.record_usage(
-                                        session_key=usage['session_key'],
-                                        model=usage.get('model', 'unknown'),
-                                        prompt_tokens=usage.get('prompt_tokens', 0),
-                                        completion_tokens=usage.get('completion_tokens', 0),
-                                        total_tokens=usage.get('total_tokens', 0),
-                                        llm_calls=usage.get('llm_calls', 0),
-                                        started_at=usage.get('started_at', ''),
-                                        finished_at=usage.get('finished_at', ''),
-                                    )
-                                    logger.info(f"Recorded usage for {usage['session_key']}: {usage.get('total_tokens', 0)} tokens")
+                                if usage:
+                                    self._try_record_usage(usage)
                             except Exception as e:
-                                logger.error(f"Failed to record usage from done event: {e}")
+                                logger.error(f"Failed to process done event: {e}")
                         current_event = ''
                         current_data = ''
                         self.wfile.flush()
@@ -967,14 +968,99 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
                 pass
         except BrokenPipeError:
             logger.warning(f"Client disconnected during SSE stream for session {session_id}")
+            # Client disconnected but task may still be running/completed.
+            # Try to recover usage from worker in background.
+            self._try_recover_usage(session_key)
         except Exception as e:
             logger.error(f"SSE stream error for session {session_id}: {e}")
+            # Also try to recover usage on other stream errors (e.g. timeout)
+            self._try_recover_usage(session_key)
             try:
                 self._send_json({
                     'reply': f'❌ 转发失败: {str(e)}'
                 }, 500)
             except Exception:
                 pass
+
+    def _try_recover_usage(self, session_key):
+        """Try to recover usage data from worker when SSE stream was interrupted.
+        
+        Polls worker task-status up to 3 times with delay, since the task may
+        still be running when the SSE stream breaks.
+        """
+        def _poll():
+            encoded_key = urllib.parse.quote(session_key, safe='')
+            for attempt in range(3):
+                time.sleep(5 * (attempt + 1))  # 5s, 10s, 15s
+                try:
+                    req = urllib.request.Request(
+                        f'{WORKER_URL}/tasks/{encoded_key}',
+                        method='GET',
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        data = json.loads(resp.read().decode('utf-8'))
+
+                    if data.get('status') in ('done', 'error') and data.get('usage'):
+                        self._try_record_usage(data['usage'])
+                        return
+                    elif data.get('status') == 'running':
+                        continue  # Still running, try again
+                    else:
+                        return  # Task done but no usage, or unknown
+                except Exception as e:
+                    logger.debug(f"Usage recovery attempt {attempt+1} failed for {session_key}: {e}")
+
+        threading.Thread(target=_poll, daemon=True).start()
+
+    # Set of recently recorded usage keys to avoid duplicate DB writes.
+    # Key: (session_key, finished_at, model, total_tokens)
+    _recorded_usage = set()
+    _recorded_usage_lock = threading.Lock()
+
+    def _try_record_usage(self, usage):
+        """Record usage to analytics DB with deduplication.
+        
+        Uses (session_key, finished_at, model, total_tokens) as dedup key.
+        Thread-safe via in-memory set + lock.
+        """
+        if not usage or not usage.get('session_key'):
+            return
+
+        dedup_key = (
+            usage['session_key'],
+            usage.get('finished_at', ''),
+            usage.get('model', 'unknown'),
+            usage.get('total_tokens', 0),
+        )
+
+        with self._recorded_usage_lock:
+            if dedup_key in self._recorded_usage:
+                return
+            self._recorded_usage.add(dedup_key)
+            # Prevent unbounded growth — trim old entries
+            if len(self._recorded_usage) > 1000:
+                # Keep only the most recent ~500 entries (no ordering, just trim)
+                excess = len(self._recorded_usage) - 500
+                for _ in range(excess):
+                    self._recorded_usage.pop()
+
+        try:
+            analytics_db.record_usage(
+                session_key=usage['session_key'],
+                model=usage.get('model', 'unknown'),
+                prompt_tokens=usage.get('prompt_tokens', 0),
+                completion_tokens=usage.get('completion_tokens', 0),
+                total_tokens=usage.get('total_tokens', 0),
+                llm_calls=usage.get('llm_calls', 0),
+                started_at=usage.get('started_at', ''),
+                finished_at=usage.get('finished_at', ''),
+            )
+            logger.info(f"Recorded usage for {usage['session_key']}: {usage.get('total_tokens', 0)} tokens")
+        except Exception as e:
+            logger.error(f"Failed to record usage: {e}")
+            # Remove from dedup set so it can be retried
+            with self._recorded_usage_lock:
+                self._recorded_usage.discard(dedup_key)
 
     def _serve_static(self, path):
         """Serve static files from frontend/dist with SPA fallback."""
@@ -1017,21 +1103,48 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     import socketserver
+
+    if DAEMONIZE:
+        # Double-fork to fully detach from parent process.
+        # This avoids PIPE fd inheritance issues when launched via exec tool.
+        pid = os.fork()
+        if pid > 0:
+            # Parent: print PID and exit immediately
+            print(f"Gateway daemonized (pid={pid})")
+            sys.exit(0)
+        # Child: new session, second fork
+        os.setsid()
+        pid2 = os.fork()
+        if pid2 > 0:
+            sys.exit(0)
+        # Grandchild: redirect stdio to /dev/null
+        sys.stdin = open(os.devnull, 'r')
+        sys.stdout = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w')
+        # Redirect low-level fds too
+        devnull_fd = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull_fd, 0)
+        os.dup2(devnull_fd, 1)
+        os.dup2(devnull_fd, 2)
+        os.close(devnull_fd)
+
     class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         daemon_threads = True
     server = ThreadedHTTPServer(('127.0.0.1', PORT), GatewayHandler)
     logger.info(f"Gateway starting on http://localhost:{PORT}")
     logger.info(f"Worker: {WORKER_URL}")
     logger.info(f"Log file: {LOG_FILE}")
-    print(f"🐈 nanobot Gateway running at http://localhost:{PORT}")
-    print(f"   Worker: {WORKER_URL}")
-    print(f"   Health: http://localhost:{PORT}/api/health")
-    print(f"   Log: {LOG_FILE}")
-    print(f"   Threaded: yes (concurrent requests supported)")
-    print(f"   Press Ctrl+C to stop")
+    if not DAEMONIZE:
+        print(f"🐈 nanobot Gateway running at http://localhost:{PORT}")
+        print(f"   Worker: {WORKER_URL}")
+        print(f"   Health: http://localhost:{PORT}/api/health")
+        print(f"   Log: {LOG_FILE}")
+        print(f"   Threaded: yes (concurrent requests supported)")
+        print(f"   Press Ctrl+C to stop")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n👋 Gateway stopped.")
+        if not DAEMONIZE:
+            print("\n👋 Gateway stopped.")
         logger.info("Gateway stopped by user")
         server.server_close()
