@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-nanobot Web Chat Worker v2 — SDK-based agent execution.
+nanobot Web Chat Worker v3 — Concurrent SDK-based agent execution.
 
-Replaces subprocess-based worker with in-process SDK calls.
-Uses asyncio event loop in a dedicated thread for agent execution.
+Each task gets its own AgentRunner instance for full concurrency safety.
+Multiple sessions can execute tasks simultaneously.
 
 Supports:
   POST /execute        — blocking JSON response (legacy)
   POST /execute-stream — SSE stream with real-time progress
   GET  /tasks/<key>    — query background task status
   POST /tasks/<key>/kill — cancel a running task
+  POST /tasks/<key>/inject — inject user message into running task
 
 Usage: python3 worker.py [--port 8082] [--daemonize]
 """
@@ -73,23 +74,21 @@ def _start_async_loop():
         time.sleep(0.01)
 
 
-# ── AgentRunner singleton ──
-_runner = None
-_runner_lock = threading.Lock()
+# ── AgentRunner factory — one runner per task for concurrency safety ──
+# Each concurrent task gets its own AgentRunner with independent tool context,
+# so that _set_tool_context() in one task doesn't clobber another.
 
 
-def _get_runner():
-    """Lazy-init AgentRunner singleton."""
-    global _runner
-    if _runner is not None:
-        return _runner
-    with _runner_lock:
-        if _runner is not None:
-            return _runner
-        from nanobot.sdk import AgentRunner
-        _runner = AgentRunner.from_config()
-        logger.info("AgentRunner initialized")
-        return _runner
+def _create_runner():
+    """Create a fresh AgentRunner instance for a task.
+    
+    Unlike the previous singleton approach, each task gets its own runner
+    to avoid tool context conflicts during concurrent execution.
+    """
+    from nanobot.sdk import AgentRunner
+    runner = AgentRunner.from_config()
+    logger.info("AgentRunner created for task")
+    return runner
 
 
 # ── Task Registry ──
@@ -215,7 +214,7 @@ def _run_task_sdk(session_key: str, message: str):
             pass  # Handled in the wrapper below
 
     async def _execute():
-        runner = _get_runner()
+        runner = _create_runner()
         try:
             result = await runner.run(
                 message=message,
@@ -254,6 +253,12 @@ def _run_task_sdk(session_key: str, message: str):
             # Clear SSE clients
             with task['_sse_lock']:
                 task['_sse_clients'] = []
+
+            # Close runner to release MCP connections
+            try:
+                await runner.close()
+            except Exception:
+                pass
 
             _cleanup_old_tasks()
 
@@ -324,7 +329,15 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.rstrip('/')
         if path == '/health':
-            self._send_json({'status': 'ok', 'service': 'worker', 'mode': 'sdk'})
+            # Count running tasks
+            with _tasks_lock:
+                running_count = sum(1 for t in _tasks.values() if t['status'] == 'running')
+            self._send_json({
+                'status': 'ok',
+                'service': 'worker',
+                'mode': 'sdk-concurrent',
+                'running_tasks': running_count,
+            })
             return
         if path.startswith('/tasks/'):
             session_key = path[7:]
@@ -345,16 +358,18 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         logger.info(f"Execute (blocking): session={session_key}, message={message[:80]}...")
 
         try:
-            runner = _get_runner()
-            future = asyncio.run_coroutine_threadsafe(
-                runner.run(
-                    message=message,
-                    session_key=session_key,
-                    channel='web',
-                    chat_id=session_key.split(':', 1)[-1] if ':' in session_key else session_key,
-                ),
-                _async_loop,
-            )
+            runner = _create_runner()
+            async def _blocking_run():
+                try:
+                    return await runner.run(
+                        message=message,
+                        session_key=session_key,
+                        channel='web',
+                        chat_id=session_key.split(':', 1)[-1] if ':' in session_key else session_key,
+                    )
+                finally:
+                    await runner.close()
+            future = asyncio.run_coroutine_threadsafe(_blocking_run(), _async_loop)
             reply = future.result(timeout=300)
             if not reply:
                 reply = '(无回复)'
@@ -583,11 +598,14 @@ if __name__ == '__main__':
     _start_async_loop()
     logger.info("Async event loop started")
 
-    # Pre-initialize AgentRunner (loads config, connects to MCP, etc.)
+    # Verify config is loadable (fail fast on misconfiguration)
     try:
-        _get_runner()
+        runner = _create_runner()
+        # Close immediately — just testing config + provider init
+        asyncio.run_coroutine_threadsafe(runner.close(), _async_loop).result(timeout=10)
+        logger.info("Config verified: AgentRunner creation successful")
     except Exception as e:
-        logger.error(f"Failed to initialize AgentRunner: {e}", exc_info=True)
+        logger.error(f"Failed to create AgentRunner: {e}", exc_info=True)
         sys.exit(1)
 
     class ThreadedWorkerServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -608,8 +626,5 @@ if __name__ == '__main__':
             print("\n👋 Worker stopped.")
         logger.info("Worker stopped by user")
         server.server_close()
-        # Cleanup: close the runner
-        if _runner:
-            asyncio.run_coroutine_threadsafe(_runner.close(), _async_loop).result(timeout=5)
         if _async_loop:
             _async_loop.call_soon_threadsafe(_async_loop.stop)

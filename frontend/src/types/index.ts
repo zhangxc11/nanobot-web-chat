@@ -37,6 +37,14 @@ export interface ProgressStep {
 
 export type TabKey = 'chat' | 'usage' | 'config' | 'memory' | 'skills';
 
+/** Per-session task execution state */
+export interface SessionTask {
+  sending: boolean;
+  progressSteps: ProgressStep[];
+  recovering: boolean;
+  abortController: AbortController | null;
+}
+
 export interface MessagesResponse {
   messages: Message[];
   hasMore: boolean;

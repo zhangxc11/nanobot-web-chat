@@ -888,10 +888,108 @@ async def check_user_input(self) -> str | None:
 
 ---
 
+---
+
+## 二十一、Worker 并发任务支持（原 Backlog #11）
+
+> 2026-02-26 从 Backlog 提升为正式需求。
+
+### Issue #26：Worker 不支持并发任务，前端全局单任务锁限制用户体验
+
+**现象**：
+1. 在 Session A 发送消息后，Session B 无法发送消息（输入框禁用，提示"其他对话正在执行任务"）
+2. 用户必须等待 Session A 的任务完成后，才能在 Session B 中操作
+3. 多个 Session 之间完全串行，无法并行工作
+
+**根因**：
+1. **Worker 层**：`AgentRunner` 是单例，其内部的 `AgentLoop` 实例共享工具上下文（`_set_tool_context` 设置 MessageTool/SpawnTool/CronTool 的 channel/chat_id），并发时上下文会互相覆盖
+2. **前端层**：`messageStore` 使用全局 `sending` + `sendingSessionId` 作为单任务锁，任何 session 执行任务时其他 session 全部禁用
+
+**目标**：
+1. Worker 支持**多 session 并发**执行任务
+2. 前端每个 session 独立管理任务状态，互不阻塞
+3. 同一 session 内仍然是串行的（不允许一个 session 同时执行两个任务）
+
+**技术方案**：
+
+#### 1. Worker 层 — 每任务独立 AgentRunner
+
+**问题分析**：
+- `AgentRunner` 单例的 `AgentLoop` 内部工具实例（MessageTool、SpawnTool、CronTool）通过 `_set_tool_context()` 设置 per-request 上下文
+- 在 asyncio 单线程 event loop 中，两个并发任务交替执行，`_set_tool_context` 设置的上下文会在 `await` 点被另一个任务覆盖
+- `SessionManager._cache` 在 asyncio 单线程中安全，但并发写同一 session 的 JSONL 文件不安全
+
+**解决方案**：
+- 放弃 AgentRunner 单例模式，改为**每个任务创建独立的 AgentRunner 实例**
+- 每个 AgentRunner 有独立的 AgentLoop → 独立的 ToolRegistry → 独立的工具上下文
+- Config 加载结果可以缓存（`load_config()` 只调用一次），避免重复 IO
+- MCP 连接每个 runner 独立建立（可接受的开销）
+
+```python
+# 改造前（单例）
+_runner = None
+def _get_runner():
+    global _runner
+    if _runner is None:
+        _runner = AgentRunner.from_config()
+    return _runner
+
+# 改造后（每任务独立）
+def _create_runner():
+    return AgentRunner.from_config()
+```
+
+**并发安全**：
+- 每个 AgentRunner 有独立的 SessionManager，但都读写同一 sessions 目录
+- SessionManager 的 `append_message()` 使用 `open("a")` + `fsync()`，POSIX 保证 append 写入的原子性（单行 ≤ PIPE_BUF）
+- 不同 session key 写不同文件，天然无冲突
+- 同一 session key 的并发由 Worker 层的 task registry 保证串行
+
+#### 2. Worker 层 — Task Registry 支持多任务
+
+**改动**：
+- `_tasks` 字典已经按 session_key 索引，天然支持多个 session 同时有任务
+- `_handle_execute_stream` 中的"已有运行任务"检查改为**同 session 内串行**（现有行为），不再阻止不同 session 的并发
+
+#### 3. 前端 — Per-Session 任务状态
+
+**messageStore 改动**：
+- 移除全局 `sending: boolean` 和 `sendingSessionId: string | null`
+- 新增 `taskBySession: Record<string, SessionTask>`，每个 session 独立跟踪任务状态
+  ```typescript
+  interface SessionTask {
+    sending: boolean;
+    progressSteps: ProgressStep[];
+    recovering: boolean;
+    abortController: AbortController | null;
+  }
+  ```
+- `sendMessage` 不再检查全局 `sending`，只检查当前 session 是否有任务
+- `cancelTask` 接受 sessionId 参数
+- `checkRunningTask` 只检查指定 session
+
+**ChatInput 改动**：
+- 移除 `isOtherSessionSending` 逻辑
+- 只检查当前 session 是否在执行（`isCurrentSessionSending`）
+- 其他 session 执行时当前 session 的输入框正常可用
+
+**MessageList 改动**：
+- ProgressIndicator 从 `taskBySession[activeSessionId]` 读取状态
+- 不再依赖全局 `sending`
+
+**风险评估**：
+
+| 风险 | 级别 | 说明 | 缓解措施 |
+|------|------|------|----------|
+| 内存占用增加 | 🟡 低 | 每个并发任务创建独立 AgentRunner | 任务完成后 runner 可释放 |
+| MCP 连接数增加 | 🟡 低 | 每个 runner 独立连接 MCP | 实际并发任务数通常 ≤ 3 |
+| JSONL 并发写入 | 🟡 低 | 不同 session 写不同文件 | 同 session 由 task registry 串行保护 |
+| LLM API 并发限制 | ⚠️ 中 | 多任务同时调用 LLM API | LLM provider 自带 rate limiting |
+
+---
+
 ### 手动维护的backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
-
-11、【新需求】目前的worker没有考虑并发支持，所以在前端限制了只有一个session可以发起命令。尝试给worker增加并发支持，增加好之后，前端在session的限制可以打开，每个session可以独立同时提交任务。这个涉及worker修改，也需要独立在一次交互任务中实现。
 
 *本文档将随需求迭代持续更新。*

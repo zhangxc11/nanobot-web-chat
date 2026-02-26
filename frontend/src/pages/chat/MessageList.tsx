@@ -111,9 +111,12 @@ function ProgressIndicator({ steps, recovering }: { steps: ProgressStep[]; recov
 }
 
 export default function MessageList() {
-  const { messages, loading, hasMore, sending, sendingSessionId, error, progressSteps, recovering } = useMessageStore();
+  const { messages, loading, hasMore, error, getTask } = useMessageStore();
   const { activeSessionId } = useSessionStore();
-  const isCurrentSessionSending = sending && sendingSessionId === activeSessionId;
+  const task = activeSessionId ? getTask(activeSessionId) : null;
+  const isCurrentSessionSending = task?.sending ?? false;
+  const progressSteps = task?.progressSteps ?? [];
+  const recovering = task?.recovering ?? false;
   const bottomRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);

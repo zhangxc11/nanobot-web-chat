@@ -5,16 +5,15 @@ import styles from './ChatInput.module.css';
 
 export default function ChatInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { sending, sendingSessionId, sendMessage, injectMessage, cancelTask, draftBySession, setDraft } = useMessageStore();
+  const { sendMessage, injectMessage, cancelTask, draftBySession, setDraft, getTask } = useMessageStore();
   const { activeSessionId } = useSessionStore();
+
+  // Get task state for current session
+  const task = activeSessionId ? getTask(activeSessionId) : null;
+  const isCurrentSessionSending = task?.sending ?? false;
 
   // Get draft text for current session
   const text = activeSessionId ? (draftBySession[activeSessionId] || '') : '';
-
-  // Is the current session the one with the running task?
-  const isCurrentSessionSending = sending && sendingSessionId === activeSessionId;
-  // Is another session running a task? (disable input but don't show stop button)
-  const isOtherSessionSending = sending && sendingSessionId !== null && sendingSessionId !== activeSessionId;
 
   // Auto-focus when active session changes
   useEffect(() => {
@@ -56,12 +55,12 @@ export default function ChatInput() {
 
     if (isCurrentSessionSending) {
       // Inject mode: send as supplementary input to running task
-      await injectMessage(trimmed);
-    } else if (!sending) {
+      await injectMessage(activeSessionId, trimmed);
+    } else {
       // Normal send mode
       await sendMessage(activeSessionId, trimmed);
     }
-  }, [text, activeSessionId, sending, isCurrentSessionSending, sendMessage, injectMessage, setDraft]);
+  }, [text, activeSessionId, isCurrentSessionSending, sendMessage, injectMessage, setDraft]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && e.shiftKey) {
@@ -70,16 +69,18 @@ export default function ChatInput() {
     }
   };
 
+  const handleCancel = useCallback(() => {
+    if (activeSessionId) {
+      cancelTask(activeSessionId);
+    }
+  }, [activeSessionId, cancelTask]);
+
   const disabled = !activeSessionId;
-  // Input is disabled only when another session is running a task
-  const inputDisabled = disabled || isOtherSessionSending;
 
   // Determine placeholder text
   let placeholder = '输入消息... (Shift+Enter 发送, Enter 换行)';
   if (disabled) {
     placeholder = '请先选择或创建对话';
-  } else if (isOtherSessionSending) {
-    placeholder = '其他对话正在执行任务，请等待完成...';
   } else if (isCurrentSessionSending) {
     placeholder = '输入补充信息... (Shift+Enter 注入)';
   }
@@ -95,7 +96,7 @@ export default function ChatInput() {
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          disabled={inputDisabled}
+          disabled={disabled}
         />
         {isCurrentSessionSending ? (
           <div className={styles.actionButtons}>
@@ -109,7 +110,7 @@ export default function ChatInput() {
             </button>
             <button
               className={`${styles.sendButton} ${styles.stopButton}`}
-              onClick={cancelTask}
+              onClick={handleCancel}
             >
               ■ 停止
             </button>
@@ -118,7 +119,7 @@ export default function ChatInput() {
           <button
             className={styles.sendButton}
             onClick={handleSend}
-            disabled={inputDisabled || !text.trim()}
+            disabled={disabled || !text.trim()}
           >
             发送
           </button>
