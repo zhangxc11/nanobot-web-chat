@@ -33,6 +33,7 @@
 | Phase 24: SDK 化 + 实时持久化 + 统一 Token | ✅ 已完成 | nanobot: local, web-chat: main |
 | Phase 25: 执行过程展示完整性优化 (Issue #24) | ✅ 已完成 | web-chat: main |
 | Phase 26: 工具调用间隙用户消息注入 (Issue #25) | ✅ 已完成 | nanobot: local, web-chat: main |
+| Phase 27: Worker 并发任务支持 (Issue #26) | ✅ 已完成 | web-chat: main |
 
 ---
 
@@ -844,6 +845,66 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 ### Git
 - nanobot: `94598cb` (feat/user-inject → local)
 - web-chat: `6fc7c1a` (feat/user-inject → main)
+
+---
+
+## Phase 27: Worker 并发任务支持 (Issue #26) ✅
+
+> 对应需求 §二十一 Issue #26 (Backlog #11)
+> Worker 支持多 session 并发执行任务，前端每个 session 独立管理任务状态。
+
+### 问题分析
+
+**Worker 层**：
+- 旧版使用 AgentRunner 单例，所有任务共享一个 AgentLoop 实例
+- AgentLoop 内部的工具实例（MessageTool、SpawnTool、CronTool）通过 `_set_tool_context()` 设置 per-request 上下文
+- 在 asyncio 单线程 event loop 中，并发任务交替执行时，工具上下文会在 `await` 点被覆盖
+
+**前端层**：
+- 全局 `sending` + `sendingSessionId` 作为单任务锁
+- 任何 session 执行任务时其他 session 全部禁用
+
+### 解决方案
+
+#### Worker 改动
+- 放弃 AgentRunner 单例，改为**每个任务创建独立的 AgentRunner 实例**
+- 每个 AgentRunner 有独立的 AgentLoop → 独立的 ToolRegistry → 独立的工具上下文
+- 任务完成后调用 `runner.close()` 释放 MCP 连接
+- 启动时验证 config 可加载（fail fast），但不保留全局 runner
+- Health 端点新增 `running_tasks` 计数，mode 改为 `sdk-concurrent`
+
+#### 前端改动
+- **types/index.ts**: 新增 `SessionTask` 接口（sending, progressSteps, recovering, abortController）
+- **messageStore.ts** (v20): 
+  - 移除全局 `sending`, `sendingSessionId`, `progressSteps`, `recovering`, `abortController`
+  - 新增 `taskBySession: Record<string, SessionTask>`，每个 session 独立跟踪
+  - 新增 `getTask(sessionId)` 方法
+  - `injectMessage` 和 `cancelTask` 改为接受 `sessionId` 参数
+  - `_updateTask` 辅助函数实现不可变更新
+- **ChatInput.tsx**: 
+  - 移除 `isOtherSessionSending` 逻辑
+  - 只检查当前 session 的 task 状态
+  - 其他 session 执行时当前 session 输入框正常可用
+- **MessageList.tsx**: 
+  - 从 `getTask(activeSessionId)` 读取 per-session 状态
+  - ProgressIndicator 渲染逻辑不变，数据来源改为 per-session
+
+### 并发安全分析
+- 每个 AgentRunner 独立的 SessionManager 实例，但都读写同一 sessions 目录
+- 不同 session key 写不同 JSONL 文件，天然无冲突
+- 同一 session key 的并发由 Worker task registry 保证串行（已有逻辑）
+- POSIX `open("a")` + `fsync()` 保证 append 写入原子性
+
+### 改动文件
+- `worker.py` — 每任务独立 runner + runner.close() + health 增强
+- `frontend/src/types/index.ts` — SessionTask 接口
+- `frontend/src/store/messageStore.ts` — per-session task state (v20)
+- `frontend/src/pages/chat/ChatInput.tsx` — 移除全局锁
+- `frontend/src/pages/chat/MessageList.tsx` — per-session task 读取
+- `docs/REQUIREMENTS.md` — Issue #26 需求描述
+
+### Git
+- web-chat: `667419a` (feat/concurrent-tasks → main)
 
 ---
 
