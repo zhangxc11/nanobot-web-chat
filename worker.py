@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """
-nanobot Web Chat Worker — Minimal service for executing nanobot agent.
+nanobot Web Chat Worker v2 — SDK-based agent execution.
+
+Replaces subprocess-based worker with in-process SDK calls.
+Uses asyncio event loop in a dedicated thread for agent execution.
 
 Supports:
   POST /execute        — blocking JSON response (legacy)
   POST /execute-stream — SSE stream with real-time progress
   GET  /tasks/<key>    — query background task status
+  POST /tasks/<key>/kill — cancel a running task
 
-Key design: nanobot subprocess runs in a background thread, decoupled from
-the HTTP connection. If the SSE stream breaks (e.g. gateway restart), the
-subprocess continues running and results are persisted to JSONL.
-
-Usage: python3 worker.py [--port 8082]
+Usage: python3 worker.py [--port 8082] [--daemonize]
 """
 
+import asyncio
 import http.server
 import json
 import logging
 import os
-import subprocess
+import socketserver
 import sys
 import threading
 import time
@@ -48,9 +49,49 @@ _sh.setFormatter(_fmt)
 logger.addHandler(_fh)
 logger.addHandler(_sh)
 
+
+# ── Async event loop in a dedicated thread ──
+_async_loop: asyncio.AbstractEventLoop | None = None
+_async_thread: threading.Thread | None = None
+
+
+def _start_async_loop():
+    """Start a dedicated asyncio event loop in a background thread."""
+    global _async_loop, _async_thread
+
+    def _run_loop():
+        global _async_loop
+        _async_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_async_loop)
+        _async_loop.run_forever()
+
+    _async_thread = threading.Thread(target=_run_loop, daemon=True)
+    _async_thread.start()
+    # Wait for loop to be ready
+    while _async_loop is None:
+        time.sleep(0.01)
+
+
+# ── AgentRunner singleton ──
+_runner = None
+_runner_lock = threading.Lock()
+
+
+def _get_runner():
+    """Lazy-init AgentRunner singleton."""
+    global _runner
+    if _runner is not None:
+        return _runner
+    with _runner_lock:
+        if _runner is not None:
+            return _runner
+        from nanobot.sdk import AgentRunner
+        _runner = AgentRunner.from_config()
+        logger.info("AgentRunner initialized")
+        return _runner
+
+
 # ── Task Registry ──
-# Tracks running/completed nanobot tasks, keyed by session_key.
-# Each entry: { status, pid, started_at, finished_at, progress, return_code, error }
 _tasks = {}       # session_key -> task dict
 _tasks_lock = threading.Lock()
 TASK_TTL = 600    # Keep completed tasks for 10 minutes
@@ -67,141 +108,116 @@ def _cleanup_old_tasks():
             del _tasks[k]
 
 
-def _run_task_background(session_key, message):
-    """Run nanobot agent in a background thread. Updates task registry."""
+def _run_task_sdk(session_key: str, message: str):
+    """Run nanobot agent via SDK in the async event loop. Updates task registry."""
+    from nanobot.agent.callbacks import DefaultCallbacks, AgentResult
+
     task = {
         'status': 'running',
-        'pid': None,
         'started_at': datetime.now().isoformat(),
         'finished_at': None,
-        'progress': [],       # list of progress text lines
-        'return_code': None,
+        'progress': [],
         'error': None,
         '_finished_ts': 0,
-        '_sse_clients': [],   # list of SSE write functions (can be empty)
+        '_sse_clients': [],
         '_sse_lock': threading.Lock(),
-        '_usage': None,       # usage data extracted from stderr
+        '_usage': None,
+        '_async_task': None,  # asyncio.Task for cancellation
     }
     with _tasks_lock:
         _tasks[session_key] = task
 
-    proc = None
-    try:
-        env = os.environ.copy()
-        env['PYTHONUNBUFFERED'] = '1'
+    class WorkerCallbacks(DefaultCallbacks):
+        """Callbacks that bridge async agent events to the task registry + SSE."""
 
-        proc = subprocess.Popen(
-            ['nanobot', 'agent', '-m', message, '--no-markdown', '-s', session_key],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1,
-            start_new_session=True,
-            env=env,
-        )
-        task['pid'] = proc.pid
-        logger.info(f"Task started: session={session_key}, PID={proc.pid}")
+        async def on_progress(self, text: str, *, tool_hint: bool = False) -> None:
+            task['progress'].append(text)
+            _notify_sse(task, 'progress', {'text': text})
 
-        # Read stderr in a separate thread to capture usage JSON
-        def _read_stderr():
-            for line in proc.stderr:
-                line = line.rstrip('\n')
-                if not line:
-                    continue
-                # Check for __usage__ JSON marker from nanobot agent loop
-                try:
-                    obj = json.loads(line)
-                    if obj.get('__usage__'):
-                        task['_usage'] = {
-                            'session_key': session_key,
-                            'model': obj.get('model', 'unknown'),
-                            'prompt_tokens': obj.get('prompt_tokens', 0),
-                            'completion_tokens': obj.get('completion_tokens', 0),
-                            'total_tokens': obj.get('total_tokens', 0),
-                            'llm_calls': obj.get('llm_calls', 0),
-                            'started_at': obj.get('started_at', ''),
-                            'finished_at': obj.get('finished_at', ''),
-                        }
-                        logger.info(f"Usage extracted from stderr: {obj.get('total_tokens', 0)} tokens")
-                        continue
-                except (json.JSONDecodeError, ValueError):
-                    pass
-                # Log other stderr lines for debugging
-                logger.debug(f"stderr: {line[:200]}")
+        async def on_message(self, message: dict) -> None:
+            # Messages are persisted by the core layer; nothing extra needed
+            pass
 
-        stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
-        stderr_thread.start()
+        async def on_usage(self, usage: dict) -> None:
+            task['_usage'] = {
+                'session_key': session_key,
+                'model': usage.get('model', 'unknown'),
+                'prompt_tokens': usage.get('prompt_tokens', 0),
+                'completion_tokens': usage.get('completion_tokens', 0),
+                'total_tokens': usage.get('total_tokens', 0),
+                'llm_calls': usage.get('llm_calls', 0),
+                'started_at': usage.get('started_at', ''),
+                'finished_at': usage.get('finished_at', ''),
+            }
+            logger.info(f"Usage: {usage.get('total_tokens', 0)} tokens, "
+                        f"{usage.get('llm_calls', 0)} calls")
 
-        # Read stdout line by line
-        for line in proc.stdout:
-            line = line.rstrip('\n')
-            if not line:
-                continue
+        async def on_done(self, result: AgentResult) -> None:
+            pass  # Handled in the wrapper below
 
-            # Progress lines: "  ↳ content"
-            if line.lstrip().startswith('↳'):
-                content = line.lstrip()
-                if content.startswith('↳'):
-                    content = content[1:].lstrip()
-                task['progress'].append(content)
+        async def on_error(self, error: Exception) -> None:
+            pass  # Handled in the wrapper below
 
-                # Notify SSE clients (best-effort, ignore errors)
-                with task['_sse_lock']:
-                    alive = []
-                    for sse_fn in task['_sse_clients']:
-                        try:
-                            sse_fn('progress', {'text': content})
-                            alive.append(sse_fn)
-                        except Exception:
-                            pass  # Client disconnected
-                    task['_sse_clients'] = alive
-
-        proc.wait(timeout=300)
-        stderr_thread.join(timeout=5)  # Wait for stderr thread to finish
-
-        if proc.returncode == 0:
+    async def _execute():
+        runner = _get_runner()
+        try:
+            result = await runner.run(
+                message=message,
+                session_key=session_key,
+                channel='web',
+                chat_id=session_key.split(':', 1)[-1] if ':' in session_key else session_key,
+                callbacks=WorkerCallbacks(),
+            )
             task['status'] = 'done'
-            task['return_code'] = 0
             logger.info(f"Task done: session={session_key}, steps={len(task['progress'])}")
-        else:
+        except asyncio.CancelledError:
             task['status'] = 'error'
-            task['return_code'] = proc.returncode
-            task['error'] = f'exit code {proc.returncode}'
-            logger.error(f"Task failed: session={session_key}, code={proc.returncode}")
+            task['error'] = 'Cancelled by user'
+            logger.info(f"Task cancelled: session={session_key}")
+        except Exception as e:
+            task['status'] = 'error'
+            task['error'] = str(e)
+            logger.error(f"Task error: session={session_key}, error={e}", exc_info=True)
+        finally:
+            task['finished_at'] = datetime.now().isoformat()
+            task['_finished_ts'] = time.time()
 
-    except subprocess.TimeoutExpired:
-        if proc:
-            proc.kill()
-        task['status'] = 'error'
-        task['error'] = 'Timeout (300s)'
-        logger.error(f"Task timeout: session={session_key}")
-    except Exception as e:
-        task['status'] = 'error'
-        task['error'] = str(e)
-        logger.error(f"Task exception: session={session_key}, error={e}")
-    finally:
-        task['finished_at'] = datetime.now().isoformat()
-        task['_finished_ts'] = time.time()
+            usage_data = task.get('_usage')
+            if usage_data:
+                task['usage'] = usage_data
 
-        # Get usage data extracted from stderr
-        usage_data = task.get('_usage')
-        if usage_data:
-            task['usage'] = usage_data
+            # Notify SSE clients of completion
+            if task['status'] == 'done':
+                done_payload = {'success': True}
+                if usage_data:
+                    done_payload['usage'] = usage_data
+                _notify_sse(task, 'done', done_payload)
+            else:
+                _notify_sse(task, 'error', {'message': task.get('error', 'Unknown error')})
 
-        # Notify SSE clients of completion
-        with task['_sse_lock']:
-            for sse_fn in task['_sse_clients']:
-                try:
-                    if task['status'] == 'done':
-                        done_payload = {'success': True}
-                        if usage_data:
-                            done_payload['usage'] = usage_data
-                        sse_fn('done', done_payload)
-                    else:
-                        sse_fn('error', {'message': task.get('error', 'Unknown error')})
-                except Exception:
-                    pass
-            task['_sse_clients'] = []
+            # Clear SSE clients
+            with task['_sse_lock']:
+                task['_sse_clients'] = []
 
-        _cleanup_old_tasks()
+            _cleanup_old_tasks()
+
+    # Schedule on the async event loop
+    future = asyncio.run_coroutine_threadsafe(_execute(), _async_loop)
+    # Store the asyncio task for cancellation (via the future)
+    task['_future'] = future
+
+
+def _notify_sse(task, event: str, data: dict):
+    """Notify all SSE clients of an event (thread-safe)."""
+    with task['_sse_lock']:
+        alive = []
+        for sse_fn in task['_sse_clients']:
+            try:
+                sse_fn(event, data)
+                alive.append(sse_fn)
+            except Exception:
+                pass  # Client disconnected
+        task['_sse_clients'] = alive
 
 
 class WorkerHandler(http.server.BaseHTTPRequestHandler):
@@ -239,8 +255,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         elif path == '/execute-stream':
             self._handle_execute_stream()
         elif path.startswith('/tasks/') and path.endswith('/kill'):
-            # POST /tasks/<key>/kill
-            session_key = path[7:-5]  # between "/tasks/" and "/kill"
+            session_key = path[7:-5]
             session_key = session_key.replace('%3A', ':').replace('%3a', ':')
             self._handle_kill_task(session_key)
         else:
@@ -249,10 +264,10 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.rstrip('/')
         if path == '/health':
-            self._send_json({'status': 'ok', 'service': 'worker'})
+            self._send_json({'status': 'ok', 'service': 'worker', 'mode': 'sdk'})
             return
         if path.startswith('/tasks/'):
-            session_key = path[7:]  # after "/tasks/"
+            session_key = path[7:]
             session_key = session_key.replace('%3A', ':').replace('%3a', ':')
             self._handle_get_task(session_key)
             return
@@ -270,22 +285,22 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         logger.info(f"Execute (blocking): session={session_key}, message={message[:80]}...")
 
         try:
-            result = subprocess.run(
-                ['nanobot', 'agent', '-m', message, '--no-markdown', '-s', session_key],
-                capture_output=True, text=True, timeout=300,
-                start_new_session=True,
+            runner = _get_runner()
+            future = asyncio.run_coroutine_threadsafe(
+                runner.run(
+                    message=message,
+                    session_key=session_key,
+                    channel='web',
+                    chat_id=session_key.split(':', 1)[-1] if ':' in session_key else session_key,
+                ),
+                _async_loop,
             )
-            reply = result.stdout.strip()
-            lines = reply.split('\n')
-            if lines and '🐈' in lines[0]:
-                reply = '\n'.join(lines[1:]).strip()
-            if not reply and result.stderr:
-                reply = f'(stderr) {result.stderr.strip()}'
+            reply = future.result(timeout=300)
             if not reply:
                 reply = '(无回复)'
             logger.info(f"Execute done: session={session_key}, reply_len={len(reply)}")
             self._send_json({'reply': reply, 'success': True})
-        except subprocess.TimeoutExpired:
+        except TimeoutError:
             logger.error(f"Execute timeout: session={session_key}")
             self._send_json({'reply': '⏱️ 请求超时，请稍后重试', 'success': False}, 504)
         except Exception as e:
@@ -308,20 +323,14 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             existing = _tasks.get(session_key)
             if existing and existing['status'] == 'running':
                 logger.warning(f"Task already running for session={session_key}, attaching SSE")
-                # Attach to existing task as SSE client
                 self._attach_to_existing_task(existing)
                 return
 
-        # Start background task
-        thread = threading.Thread(
-            target=_run_task_background,
-            args=(session_key, message),
-            daemon=True,
-        )
-        thread.start()
+        # Start SDK task
+        _run_task_sdk(session_key, message)
 
         # Wait briefly for task to register
-        time.sleep(0.1)
+        time.sleep(0.05)
 
         # Attach as SSE client
         with _tasks_lock:
@@ -329,12 +338,10 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         if task:
             self._attach_to_existing_task(task)
         else:
-            # Task didn't start (shouldn't happen)
             self._send_json({'error': 'Failed to start task'}, 500)
 
     def _attach_to_existing_task(self, task):
         """Attach current HTTP connection as SSE client to an existing task."""
-        # Send SSE headers
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
         self.send_header('Cache-Control', 'no-cache')
@@ -353,7 +360,10 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         # If task already finished, send final event
         if task['status'] == 'done':
             try:
-                self._send_sse('done', {'success': True})
+                done_payload = {'success': True}
+                if task.get('usage'):
+                    done_payload['usage'] = task['usage']
+                self._send_sse('done', done_payload)
             except BrokenPipeError:
                 pass
             return
@@ -378,12 +388,9 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             task['_sse_clients'].append(sse_writer)
 
         # Block until task finishes or client disconnects
-        # We do this by polling — the background thread will call sse_writer
-        # which will raise BrokenPipeError if client disconnected
         try:
             while task['status'] == 'running':
                 time.sleep(0.5)
-            # Task finished — the background thread already sent done/error via sse_writer
         except Exception:
             pass
         finally:
@@ -395,7 +402,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
     # ── Task kill ──
 
     def _handle_kill_task(self, session_key):
-        """POST /tasks/<session_key>/kill — kill a running task."""
+        """POST /tasks/<session_key>/kill — cancel a running task."""
         with _tasks_lock:
             task = _tasks.get(session_key)
 
@@ -407,36 +414,15 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'status': task['status'], 'message': 'Task not running'})
             return
 
-        pid = task.get('pid')
-        if pid:
-            try:
-                import signal
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-                logger.info(f"Killed task: session={session_key}, PID={pid}")
-            except ProcessLookupError:
-                logger.warning(f"Process already gone: PID={pid}")
-            except Exception as e:
-                logger.error(f"Failed to kill PID={pid}: {e}")
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except Exception:
-                    pass
+        # Cancel the asyncio future
+        future = task.get('_future')
+        if future:
+            future.cancel()
+            logger.info(f"Cancelled task: session={session_key}")
+        else:
+            logger.warning(f"No future to cancel: session={session_key}")
 
-        task['status'] = 'error'
-        task['error'] = 'Killed by user'
-        task['finished_at'] = datetime.now().isoformat()
-        task['_finished_ts'] = time.time()
-
-        # Notify SSE clients
-        with task['_sse_lock']:
-            for sse_fn in task['_sse_clients']:
-                try:
-                    sse_fn('error', {'message': 'Task killed by user'})
-                except Exception:
-                    pass
-            task['_sse_clients'] = []
-
-        self._send_json({'status': 'killed', 'message': 'Task killed'})
+        self._send_json({'status': 'cancelled', 'message': 'Task cancellation requested'})
 
     # ── Task status query ──
 
@@ -454,11 +440,10 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
 
         result = {
             'status': task['status'],
-            'pid': task.get('pid'),
             'started_at': task.get('started_at'),
             'finished_at': task.get('finished_at'),
             'progress_count': len(task.get('progress', [])),
-            'progress': list(task.get('progress', [])),  # full progress history
+            'progress': list(task.get('progress', [])),
         }
         if task['status'] == 'error':
             result['error'] = task.get('error', '')
@@ -482,8 +467,6 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    import socketserver
-
     if DAEMONIZE:
         pid = os.fork()
         if pid > 0:
@@ -502,13 +485,24 @@ if __name__ == '__main__':
         os.dup2(devnull_fd, 2)
         os.close(devnull_fd)
 
+    # Start async event loop
+    _start_async_loop()
+    logger.info("Async event loop started")
+
+    # Pre-initialize AgentRunner (loads config, connects to MCP, etc.)
+    try:
+        _get_runner()
+    except Exception as e:
+        logger.error(f"Failed to initialize AgentRunner: {e}", exc_info=True)
+        sys.exit(1)
+
     class ThreadedWorkerServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         daemon_threads = True
     server = ThreadedWorkerServer(('127.0.0.1', PORT), WorkerHandler)
-    logger.info(f"Worker starting on http://localhost:{PORT}")
+    logger.info(f"Worker starting on http://localhost:{PORT} (SDK mode)")
     logger.info(f"Log file: {LOG_FILE}")
     if not DAEMONIZE:
-        print(f"🔧 nanobot Worker running at http://localhost:{PORT}")
+        print(f"🔧 nanobot Worker (SDK) running at http://localhost:{PORT}")
         print(f"   Health: http://localhost:{PORT}/health")
         print(f"   Log: {LOG_FILE}")
         print(f"   Endpoints: POST /execute, POST /execute-stream (SSE), GET /tasks/<key>")
@@ -520,3 +514,8 @@ if __name__ == '__main__':
             print("\n👋 Worker stopped.")
         logger.info("Worker stopped by user")
         server.server_close()
+        # Cleanup: close the runner
+        if _runner:
+            asyncio.run_coroutine_threadsafe(_runner.close(), _async_loop).result(timeout=5)
+        if _async_loop:
+            _async_loop.call_soon_threadsafe(_async_loop.stop)
