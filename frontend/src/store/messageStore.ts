@@ -1,8 +1,12 @@
-// Message state store
+// Message state store — v17 (task binding + kill + recovery)
 import { create } from 'zustand';
 import type { Message } from '../types';
 import * as api from '../services/api';
 import { useSessionStore } from './sessionStore';
+
+// Build version marker for cache busting
+const _BUILD_VERSION = '17.0';
+console.debug('[messageStore] version:', _BUILD_VERSION);
 
 interface MessageStore {
   messages: Message[];
