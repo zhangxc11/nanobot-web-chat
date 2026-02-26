@@ -959,4 +959,56 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 
 ---
 
+## Phase 29: Session 管理增强 — 文件名显示 + 删除 + 标题优化 (Issue #29/#30/#31) ✅
+
+> 日期：2026-02-27
+> 需求：REQUIREMENTS.md §二十三
+
+### 需求概述
+
+1. **Issue #29**：Session 列表显示文件名（小字）
+2. **Issue #30**：支持删除 Session
+3. **Issue #31**：Session 标题显示优化
+
+### 实现步骤
+
+#### T1: 后端改动
+
+- `gateway.py`:
+  - `_handle_get_sessions` 返回新增 `filename`（如 `webchat_1772030778.jsonl`）和 `sessionKey`（如 `webchat:1772030778`）字段
+  - `_handle_create_session` 返回同样包含 `filename` 和 `sessionKey`
+  - 新增 `do_DELETE` 路由 + `_handle_delete_session` 方法（删除 JSONL 文件）
+  - CORS 头增加 `DELETE` 方法支持
+
+#### T2: 前端改动
+
+- `types/index.ts`: `Session` 类型新增 `filename` 和 `sessionKey` 字段
+- `services/api.ts`: 新增 `deleteSession(sessionId)` API 函数
+- `store/sessionStore.ts`: 新增 `deleteSession` action（删除后自动切换到下一个 session）
+- `Sidebar/SessionList.tsx`:
+  - `SessionItem` 增加 `filename`、`sessionKey` props
+  - 新增 `getDisplayTitle()` 函数：summary 等于 session_id 时显示友好名称（`webchat_` → "新对话"，`cli_` → "CLI 对话"）
+  - 标题行改为 flex 布局（`.sessionTopRow`），右侧放删除按钮
+  - 删除按钮 `×` 默认隐藏，hover 时显示；点击后弹出行内确认面板
+  - 底部 meta 行显示 monospace 小字文件名 + 时间
+- `Sidebar/Sidebar.module.css`:
+  - 新增 `.sessionTopRow`、`.sessionDeleteBtn`、`.deleteConfirm*`、`.sessionFilename` 样式
+  - 删除按钮 hover 变红色，确认面板内嵌 session item
+
+### 改动文件
+- `gateway.py` — DELETE API + filename/sessionKey 字段 + CORS DELETE
+- `frontend/src/types/index.ts` — Session 类型扩展
+- `frontend/src/services/api.ts` — deleteSession API
+- `frontend/src/store/sessionStore.ts` — deleteSession action
+- `frontend/src/pages/chat/Sidebar/SessionList.tsx` — 文件名显示 + 删除 + 标题优化
+- `frontend/src/pages/chat/Sidebar/Sidebar.module.css` — 新增样式
+- `docs/REQUIREMENTS.md` — §二十三 Issue #29/#30/#31
+- `docs/ARCHITECTURE.md` — API 总览 + DELETE API + Session 响应格式
+- `docs/DEVLOG.md` — Phase 29 记录
+
+### Git
+- web-chat commit: e108530
+
+---
+
 *每次 session 更新此文件后 commit。*

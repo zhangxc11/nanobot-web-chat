@@ -28,6 +28,14 @@ export async function renameSession(sessionId: string, summary: string): Promise
   return res.json();
 }
 
+export async function deleteSession(sessionId: string): Promise<{ id: string; deleted: boolean }> {
+  const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Failed to delete session: ${res.status}`);
+  return res.json();
+}
+
 // ── Messages ──
 
 export async function fetchMessages(

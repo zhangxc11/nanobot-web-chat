@@ -3,6 +3,8 @@
 export interface Session {
   id: string;
   summary: string;
+  filename: string;
+  sessionKey: string;
   lastActiveAt: string;
   messageCount: number;
 }

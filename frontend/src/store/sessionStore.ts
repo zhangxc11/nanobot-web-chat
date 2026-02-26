@@ -12,6 +12,7 @@ interface SessionStore {
   setActiveSession: (id: string) => void;
   createSession: () => Promise<Session | null>;
   renameSession: (id: string, summary: string) => Promise<boolean>;
+  deleteSession: (id: string) => Promise<boolean>;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
@@ -61,6 +62,25 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           session.id === id ? { ...session, summary } : session
         ),
       }));
+      return true;
+    } catch (err) {
+      set({ error: String(err) });
+      return false;
+    }
+  },
+
+  deleteSession: async (id) => {
+    try {
+      await api.deleteSession(id);
+      const { sessions, activeSessionId } = get();
+      const remaining = sessions.filter((s) => s.id !== id);
+      const newActive =
+        activeSessionId === id
+          ? remaining.length > 0
+            ? remaining[0].id
+            : null
+          : activeSessionId;
+      set({ sessions: remaining, activeSessionId: newActive });
       return true;
     } catch (err) {
       set({ error: String(err) });

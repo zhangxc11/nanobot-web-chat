@@ -314,8 +314,10 @@ nanobot 的消息流中，工具调用产生多条 JSONL 记录：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/sessions` | Session 列表（含摘要、活跃时间），按时间倒序 |
+| GET | `/api/sessions` | Session 列表（含摘要、文件名、活跃时间），按时间倒序 |
 | POST | `/api/sessions` | 创建新 Session |
+| PATCH | `/api/sessions/:id` | 重命名 Session |
+| DELETE | `/api/sessions/:id` | 删除 Session（删除 JSONL 文件） |
 | GET | `/api/sessions/:id` | 获取单个 Session 详情 |
 | GET | `/api/sessions/:id/messages` | 分页加载消息（支持 `limit` & `before`） |
 | POST | `/api/sessions/:id/messages` | 发送消息并获取回复 |
@@ -332,6 +334,8 @@ nanobot 的消息流中，工具调用产生多条 JSONL 记录：
     {
       "id": "cli_webchat",
       "summary": "你好，查询日程...",
+      "filename": "cli_webchat.jsonl",
+      "sessionKey": "cli:webchat",
       "lastActiveAt": "2026-02-25T18:21:00",
       "messageCount": 67
     }
@@ -339,7 +343,7 @@ nanobot 的消息流中，工具调用产生多条 JSONL 记录：
 }
 ```
 
-**摘要生成逻辑**：读取 Session 文件中第一条 `role: user` 消息的 content，截取前 50 个字符，过滤掉 `[Runtime Context]` 部分。
+**摘要生成逻辑**：优先使用 `custom_name`，其次读取第一条 `role: user` 消息的 content 前 80 字符（过滤 `[Runtime Context]`），最后回退到 session_id。
 
 #### GET `/api/sessions/:id/messages?limit=30&before=<timestamp>`
 
@@ -384,7 +388,21 @@ nanobot 的消息流中，工具调用产生多条 JSONL 记录：
 {
   "id": "webchat_1740480000",
   "summary": "新对话",
+  "filename": "webchat_1740480000.jsonl",
+  "sessionKey": "webchat:1740480000",
   "lastActiveAt": "2026-02-25T18:30:00"
+}
+```
+
+#### DELETE `/api/sessions/:id`
+
+删除指定 Session 的 JSONL 文件。SQLite 中的 usage 数据不受影响。
+
+```json
+// Response
+{
+  "id": "webchat_1740480000",
+  "deleted": true
 }
 ```
 

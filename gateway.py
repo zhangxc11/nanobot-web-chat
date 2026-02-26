@@ -86,7 +86,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', len(body))
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
         self.wfile.write(body)
@@ -95,7 +95,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         """Handle CORS preflight requests."""
         self.send_response(204)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
@@ -230,6 +230,18 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
 
         self._send_json({'error': 'Not found'}, 404)
 
+    # ── DELETE routes ──
+
+    def do_DELETE(self):
+        path, params = self._parse_path()
+
+        route_params = self._match_route(path, '/api/sessions/:id')
+        if route_params:
+            self._handle_delete_session(route_params['id'])
+            return
+
+        self._send_json({'error': 'Not found'}, 404)
+
     # ── API handlers ──
 
     def _handle_get_sessions(self, params):
@@ -279,9 +291,14 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
                 from datetime import datetime
                 last_active = datetime.fromtimestamp(mtime).isoformat()
 
+            # Read session key from metadata
+            session_key = metadata.get('key', '')
+
             sessions.append({
                 'id': session_id,
                 'summary': summary,
+                'filename': session_id + '.jsonl',
+                'sessionKey': session_key,
                 'lastActiveAt': last_active,
                 'messageCount': message_count,
             })
@@ -384,6 +401,8 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         self._send_json({
             'id': session_id,
             'summary': '新对话',
+            'filename': session_id + '.jsonl',
+            'sessionKey': session_key,
             'lastActiveAt': datetime.now().isoformat(),
             'messageCount': 0,
         })
@@ -448,6 +467,25 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Failed to rename session {session_id}: {e}")
             self._send_json({'error': f'Rename failed: {str(e)}'}, 500)
+
+    def _handle_delete_session(self, session_id):
+        """DELETE /api/sessions/:id — delete a session JSONL file."""
+        if '/' in session_id or '..' in session_id:
+            self._send_json({'error': 'Invalid session id'}, 400)
+            return
+
+        filepath = os.path.join(SESSIONS_DIR, session_id + '.jsonl')
+        if not os.path.exists(filepath):
+            self._send_json({'error': 'Session not found'}, 404)
+            return
+
+        try:
+            os.remove(filepath)
+            logger.info(f"Deleted session: {session_id}")
+            self._send_json({'id': session_id, 'deleted': True})
+        except Exception as e:
+            logger.error(f"Failed to delete session {session_id}: {e}")
+            self._send_json({'error': f'Delete failed: {str(e)}'}, 500)
 
     def _get_session_key(self, session_id):
         """Read the session key from the JSONL metadata line."""

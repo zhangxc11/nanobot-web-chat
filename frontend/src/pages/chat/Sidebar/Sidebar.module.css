@@ -202,6 +202,7 @@
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s;
+  position: relative;
 }
 
 .sessionItem:hover {
@@ -216,6 +217,12 @@
   background: var(--bg-tertiary);
 }
 
+.sessionTopRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
 .sessionSummary {
   font-size: 13px;
   color: var(--text-primary);
@@ -223,6 +230,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .sessionEditInput {
@@ -236,6 +245,83 @@
   width: 100%;
   outline: none;
   box-sizing: border-box;
+  flex: 1;
+}
+
+.sessionDeleteBtn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+  padding: 0;
+  line-height: 1;
+}
+
+.sessionItem:hover .sessionDeleteBtn {
+  opacity: 0.6;
+}
+
+.sessionDeleteBtn:hover {
+  opacity: 1 !important;
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
+}
+
+.deleteConfirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.deleteConfirmText {
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.deleteConfirmYes {
+  padding: 2px 8px;
+  background: #ff4d4f;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.deleteConfirmYes:hover {
+  opacity: 0.85;
+}
+
+.deleteConfirmNo {
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.deleteConfirmNo:hover {
+  background: var(--bg-hover);
 }
 
 .sessionActive .sessionSummary {
@@ -246,10 +332,23 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 3px;
+}
+
+.sessionFilename {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
 }
 
 .sessionTime {
   font-size: 11px;
   color: var(--text-muted);
+  flex-shrink: 0;
 }
