@@ -149,7 +149,10 @@ def _run_task_sdk(session_key: str, message: str):
 
         async def on_progress(self, text: str, *, tool_hint: bool = False) -> None:
             task['progress'].append(text)
-            _notify_sse(task, 'progress', {'text': text})
+            payload = {'text': text}
+            if tool_hint:
+                payload['type'] = 'tool_hint'
+            _notify_sse(task, 'progress', payload)
 
         async def on_message(self, message: dict) -> None:
             """Forward tool results and assistant thinking text as progress events."""

@@ -26,10 +26,33 @@ function truncateToolOutput(content: string, maxLen = 60): string {
   return trimmed.substring(0, maxLen) + '…';
 }
 
+/** Format tool arguments for display */
+function formatToolArgs(argsJson: string): string {
+  if (!argsJson) return '';
+  try {
+    const args = JSON.parse(argsJson);
+    if (typeof args === 'object' && args !== null) {
+      const entries = Object.entries(args);
+      if (entries.length === 0) return '';
+      // For single-arg tools, show just the value
+      if (entries.length === 1) {
+        const val = entries[0][1];
+        return typeof val === 'string' ? val : JSON.stringify(val, null, 2);
+      }
+      // For multi-arg tools, show key=value pairs
+      return entries.map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n');
+    }
+    return argsJson;
+  } catch {
+    return argsJson;
+  }
+}
+
 /** Single tool call line — ↳ style, consistent with streaming progress */
-function ToolCallLine({ name, content }: { name: string; content: string }) {
+function ToolCallLine({ name, content, args }: { name: string; content: string; args?: string }) {
   const [expanded, setExpanded] = useState(false);
   const summary = truncateToolOutput(content);
+  const formattedArgs = args ? formatToolArgs(args) : '';
 
   return (
     <div className={styles.toolCallLine}>
@@ -43,9 +66,16 @@ function ToolCallLine({ name, content }: { name: string; content: string }) {
         {!expanded && (
           <span className={styles.toolCallSummary}>{summary}</span>
         )}
+        <span className={styles.toolCallExpandIcon}>{expanded ? '▾' : '▸'}</span>
       </div>
       {expanded && (
-        <pre className={styles.toolCallDetail}>{content || '(无输出)'}</pre>
+        <div className={styles.toolCallExpandedContent}>
+          {formattedArgs && (
+            <pre className={styles.toolCallArgs}>{formattedArgs}</pre>
+          )}
+          <div className={styles.toolCallResultSep}>→</div>
+          <pre className={styles.toolCallDetail}>{content || '(无输出)'}</pre>
+        </div>
       )}
     </div>
   );
@@ -63,7 +93,7 @@ function PrecedingText({ content }: { content: string }) {
 /** Item in the collapsible tool process section */
 type ProcessItem =
   | { type: 'text'; content: string; key: string }
-  | { type: 'tool'; name: string; content: string; id: string };
+  | { type: 'tool'; name: string; content: string; args?: string; id: string };
 
 /** Collapsible group: preceding texts + tool calls */
 function ToolProcessCollapsible({ items, toolCount }: { items: ProcessItem[]; toolCount: number }) {
@@ -89,7 +119,7 @@ function ToolProcessCollapsible({ items, toolCount }: { items: ProcessItem[]; to
             if (item.type === 'text') {
               return <PrecedingText key={item.key} content={item.content} />;
             }
-            return <ToolCallLine key={item.id} name={item.name} content={item.content} />;
+            return <ToolCallLine key={item.id} name={item.name} content={item.content} args={item.args} />;
           })}
         </div>
       )}
@@ -222,6 +252,7 @@ export function AssistantTurnGroup({ messages }: { messages: Message[] }) {
             id: tc.id,
             name: tc.name,
             content: toolResult?.content || '(等待结果…)',
+            args: tc.arguments,
           });
           toolCount++;
         }

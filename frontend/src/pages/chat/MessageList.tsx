@@ -10,7 +10,7 @@ function ProgressStepItem({ step }: { step: ProgressStep }) {
   const [expanded, setExpanded] = useState(false);
 
   if (step.type === 'tool_result' && step.content) {
-    // Tool result with expandable detail
+    // Tool result with expandable detail: "↳ tool_name → summary ▸"
     return (
       <div className={styles.progressStep}>
         <span className={styles.progressArrow}>↳</span>
@@ -37,11 +37,20 @@ function ProgressStepItem({ step }: { step: ProgressStep }) {
     );
   }
 
-  // Normal progress step (thinking text or tool hint)
+  if (step.type === 'tool_hint') {
+    // Tool call hint: "↳ exec("ls -la")"
+    return (
+      <div className={styles.progressStep}>
+        <span className={styles.progressArrow}>↳</span>
+        <span className={styles.progressText}>{step.text}</span>
+      </div>
+    );
+  }
+
+  // Thinking text — no ↳ prefix, rendered as plain text with muted style
   return (
     <div className={styles.progressStep}>
-      <span className={styles.progressArrow}>↳</span>
-      <span className={styles.progressText}>{step.text}</span>
+      <span className={styles.progressThinkingText}>{step.text}</span>
     </div>
   );
 }

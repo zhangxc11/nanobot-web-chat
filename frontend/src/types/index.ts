@@ -27,9 +27,9 @@ export interface Message {
 export interface ProgressStep {
   /** Display text (e.g. "exec → result summary") */
   text: string;
-  /** Step type: undefined = normal progress, 'tool_result' = tool execution result */
-  type?: 'tool_result';
-  /** Tool name (only for tool_result type) */
+  /** Step type: undefined = thinking text, 'tool_hint' = tool call hint, 'tool_result' = tool execution result */
+  type?: 'tool_hint' | 'tool_result';
+  /** Tool name (for tool_hint and tool_result types) */
   name?: string;
   /** Full tool output content (only for tool_result type, for expand/collapse) */
   content?: string;
