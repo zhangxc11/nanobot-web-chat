@@ -31,6 +31,7 @@
 | Phase 22: Backlog 1-5 修复 | ✅ 已完成 | web-chat: main, nanobot: local |
 | Phase 23: exec PIPE 卡死修复 + Usage 刷新 | ✅ 已完成 | web-chat: main, nanobot: local |
 | Phase 24: SDK 化 + 实时持久化 + 统一 Token | ✅ 已完成 | nanobot: local, web-chat: main |
+| Phase 25: 执行过程展示完整性优化 (Issue #24) | ✅ 已完成 | web-chat: main |
 
 ---
 
@@ -740,6 +741,58 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 
 ### Commits
 - nanobot 核心: `aaaf81d` (fix), `4a4f158` (docs) on local 分支
+
+---
+
+## Phase 25: 执行过程展示完整性优化 (Issue #24) ✅
+
+> 对应需求 §十九 Issue #24
+
+### 问题
+- Web UI 执行任务过程中，ProgressIndicator 只显示思考文本和工具调用提示（如 `exec("ls -la")`）
+- **不显示工具执行结果**，用户无法在执行过程中看到工具返回了什么
+- 执行完成后从 JSONL 重载时才能看到完整的工具调用结果
+
+### 解决方案
+
+#### Worker 改动
+- `WorkerCallbacks.on_message()` 不再为空
+- 收到 `tool` 角色消息时，生成 `↳ tool_name → result_summary` 格式的 progress 事件
+- SSE progress 事件增加结构化字段：`type: 'tool_result'`, `name`, `content`（完整输出）
+- 新增 `_truncate_tool_output()` 辅助函数，提取工具输出的第一行作为摘要
+
+#### 前端改动
+- 新增 `ProgressStep` 类型（替代 `string`），包含 `text`, `type?`, `name?`, `content?`
+- `messageStore.progressSteps` 从 `string[]` 改为 `ProgressStep[]`
+- `api.ts` 的 `StreamCallbacks.onProgress` 改为传递 `ProgressStep` 对象
+- `MessageList.tsx` 新增 `ProgressStepItem` 组件：
+  - 普通进度步骤：`↳ text`（原有行为）
+  - 工具结果：`↳ tool_name → summary ▸`，可点击展开查看完整输出
+- 新增 CSS 样式：`.progressToolResult`, `.progressToolResultHeader`, `.progressToolDetail` 等
+
+#### 执行过程渲染示例
+```
+┌─────────────────────────────────────────────────────┐
+│ ↳ 让我查看一下你明天的日程。                           │  ← 思考文本
+│ ↳ read_file("/path/to/SKILL.md")                    │  ← 工具调用提示
+│ ↳ read_file → # Calendar Reader Skill...         ▸  │  ← 工具结果（可展开）
+│ ↳ exec("./query_events.sh 2026-02-27 1")            │  ← 工具调用提示
+│ ↳ exec → 查询到 5 条日程: 09:00 团队周会...        ▸  │  ← 工具结果（可展开）
+│ ● ● ●                                              │  ← 等待中
+└─────────────────────────────────────────────────────┘
+```
+
+### 改动文件
+- `worker.py` — on_message 回调 + _truncate_tool_output
+- `frontend/src/types/index.ts` — ProgressStep 类型
+- `frontend/src/services/api.ts` — StreamCallbacks 传递 ProgressStep
+- `frontend/src/store/messageStore.ts` — progressSteps 类型变更 + 兼容转换
+- `frontend/src/pages/chat/MessageList.tsx` — ProgressStepItem 组件
+- `frontend/src/pages/chat/MessageList.module.css` — 工具结果展开样式
+- `docs/REQUIREMENTS.md` — Issue #24 需求描述
+
+### Git
+- web-chat commit: `6a9621a`
 
 ---
 
