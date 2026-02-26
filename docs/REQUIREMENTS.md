@@ -1054,10 +1054,115 @@ def _create_runner():
 
 ---
 
+## 二十四、Web UI 自修改安全实践 (v3.4)
+
+> 2026-02-27 从 Backlog #14 提升为正式需求。
+
+### Issue #32：Web UI 执行涉及 worker.py 修改的任务时，kill worker = kill 自己
+
+**现象**：
+1. 通过 Web UI 发起需求（如 Phase 26 用户消息注入、Phase 27 Worker 并发任务）
+2. nanobot agent 运行在 worker 进程内（SDK 模式）
+3. 任务执行过程中需要修改 `worker.py` 并重启 worker
+4. nanobot 尝试 kill worker 进程 → **杀死了自己** → 任务中断，消息丢失
+5. 不得不切换到 CLI 模式恢复工作，重新完成未完成的任务
+
+**历史事故记录**：
+
+| 事故时间 | 涉及 Phase | 触发场景 | 后果 |
+|----------|-----------|---------|------|
+| 2026-02-25 23:50 | Phase 11 | 修改 gateway.py + 重启 | SSE 断开，任务中断 |
+| 2026-02-26 ~23:15 | Phase 26 (webchat_1772116553) | 修改 worker.py + kill worker | nanobot 自杀，转 CLI 恢复 |
+| 2026-02-26 ~23:42 | Phase 27 (webchat_1772119212) | 修改 worker.py + kill worker | nanobot 自杀，转 CLI 恢复 |
+
+**根因分析**：
+
+```
+Web UI 任务执行链路：
+
+浏览器 → gateway.py(:8081) → worker.py(:8082) → [AgentRunner in-process]
+                                    ↑                      ↑
+                              nanobot agent 在此进程内运行
+                              kill worker = kill agent = 任务中断
+```
+
+Phase 24 SDK 化之后，nanobot agent 不再是独立子进程（subprocess），而是在 worker 进程内直接运行。这意味着：
+- **修改 gateway.py**：kill gateway → SSE 断开，但 worker 内的 agent 继续运行（优雅降级已解决）
+- **修改 worker.py**：kill worker → agent 被杀死 → **不可恢复** ← 核心问题
+- **修改前端代码**：不需要重启任何进程，`vite build` 即可（安全）
+- **修改 nanobot 核心代码**：需要重启 worker（同样危险）
+
+**解决方案 — 分级实践规则**：
+
+不引入新的架构改造，而是通过**明确的操作规范**避免问题：
+
+#### 规则 1：任务分类 — 提前评估风险
+
+在发起 Web UI 任务前，根据涉及的修改文件判断风险级别：
+
+| 风险级别 | 涉及修改 | 推荐渠道 |
+|----------|---------|---------|
+| 🟢 安全 | 前端代码、文档、配置文件 | Web UI ✅ |
+| 🟡 低风险 | gateway.py | Web UI ✅（优雅降级保护） |
+| 🔴 高风险 | worker.py、nanobot 核心代码 | **CLI** ⚠️ |
+
+#### 规则 2：高风险任务必须使用 CLI
+
+涉及 `worker.py` 或 nanobot 核心代码修改的任务，**必须通过 CLI 发起**：
+
+```bash
+nanobot agent --session "feat-xxx"
+```
+
+CLI 模式下 nanobot 是独立进程，不依赖 worker/gateway，修改任何文件后可安全地用 `restart-gateway.sh` 重启服务。
+
+#### 规则 3：nanobot（AI）自觉遵守
+
+当用户通过 Web UI 发起任务时，nanobot 应：
+1. **分析任务涉及的文件**：如果可能涉及 worker.py 或 nanobot 核心修改
+2. **主动提醒用户**：建议切换到 CLI 执行
+3. **提醒话术**：
+
+```
+⚠️ 本次任务可能涉及修改 worker.py / nanobot 核心代码。
+由于我当前运行在 worker 进程内，修改后重启 worker 会导致任务中断。
+
+建议切换到 CLI 执行：
+  nanobot agent --session "feat-xxx"
+
+CLI 模式下我是独立进程，可以安全地修改和重启服务。
+```
+
+4. **如果用户坚持在 Web UI 执行**：
+   - 将任务拆分为"修改代码 + commit"和"重启服务"两步
+   - 代码修改完成后告知用户手动重启
+   - **绝不自行 kill worker 进程**
+
+#### 规则 4：任务拆分策略
+
+对于复杂的跨组件任务，拆分为多个安全步骤：
+
+```
+Step 1 (Web UI 安全执行):
+  - 修改前端代码 + vite build + commit
+  
+Step 2 (Web UI 安全执行):
+  - 修改 gateway.py + commit（不重启）
+  
+Step 3 (需要 CLI 或手动操作):
+  - 修改 worker.py + commit
+  - 用户手动: restart-gateway.sh all
+  
+Step 4 (Web UI 安全执行):
+  - 验证 + 测试
+```
+
+---
+
 ### 手动维护的backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
 
-14、【架构改进】前面两次实现需求的时候，从网页端发起，由于过程中kill worker，导致任务被停止，后续都转换到了cli才成功，请看给一个比较现实的实践建议，避免后续类似的麻烦出现。
+15、【需求】token消耗量非常大，为了有判断怎么优化，请增加一个功能，把所有的token具体消耗内容记录下来，供后续分析使用。
 
 *本文档将随需求迭代持续更新。*

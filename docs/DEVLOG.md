@@ -35,6 +35,7 @@
 | Phase 26: 工具调用间隙用户消息注入 (Issue #25) | ✅ 已完成 | nanobot: local, web-chat: main |
 | Phase 27: Worker 并发任务支持 (Issue #26) | ✅ 已完成 | web-chat: main |
 | Phase 28: 用量统计增强 + 工具调用用量展示 (Issue #27/#28) | ✅ 已完成 | web-chat: main |
+| Phase 29: Web UI 自修改安全实践 (Issue #32 / Backlog #14) | ✅ 已完成 | web-chat: main |
 
 ---
 
@@ -1008,6 +1009,36 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 
 ### Git
 - web-chat commit: e108530
+
+---
+
+## Phase 29: Web UI 自修改安全实践 (Issue #32 / Backlog #14) ✅
+
+> 对应需求 §二十四 Issue #32 (Backlog #14)
+> 建立完整的自修改安全规则体系，避免 Web UI 执行任务时 kill worker 导致自杀。
+
+### 问题背景
+
+Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Phase 27 开发过程中，
+两次从 Web UI 发起涉及 worker.py 修改的任务，nanobot 尝试 kill worker 重启时杀死了自己，
+不得不切换到 CLI 恢复工作。
+
+### 解决方案
+
+不引入新的架构改造，通过**明确的分级操作规范**避免问题：
+
+1. **任务风险评估**：发起任务前根据涉及文件判断风险级别（🟢安全/🟡低风险/🔴高风险）
+2. **高风险任务走 CLI**：涉及 worker.py 或 nanobot 核心代码的修改必须通过 CLI 执行
+3. **AI 自觉遵守**：nanobot 识别到高风险任务时主动提醒用户切换 CLI
+4. **任务拆分**：复杂跨组件任务按风险级别拆分步骤
+
+### 改动文件
+- `docs/REQUIREMENTS.md` — §二十四 Issue #32 需求描述 + backlog #14 移除
+- `docs/GUIDELINES.md` — 自修改安全规则体系升级（§1.1-1.8）
+- `docs/DEVLOG.md` — Phase 29 记录
+
+### Git
+- web-chat commit: `221c2d0`
 
 ---
 
