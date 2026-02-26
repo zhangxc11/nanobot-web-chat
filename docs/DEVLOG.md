@@ -792,7 +792,7 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 - `docs/REQUIREMENTS.md` — Issue #24 需求描述
 
 ### Git
-- web-chat commit: `6a9621a`
+- web-chat commit: `6a9621a`, `f8f5428`
 
 ---
 
