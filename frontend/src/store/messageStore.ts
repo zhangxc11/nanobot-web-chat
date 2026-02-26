@@ -1,11 +1,11 @@
-// Message state store — v17 (task binding + kill + recovery)
+// Message state store — v18 (fix progress recovery on session switch)
 import { create } from 'zustand';
 import type { Message } from '../types';
 import * as api from '../services/api';
 import { useSessionStore } from './sessionStore';
 
 // Build version marker for cache busting
-const _BUILD_VERSION = '17.0';
+const _BUILD_VERSION = '18.0';
 console.debug('[messageStore] version:', _BUILD_VERSION);
 
 interface MessageStore {
@@ -207,7 +207,22 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   },
 
   checkRunningTask: async (sessionId) => {
-    const { sending, sendingSessionId } = get();
+    const { sending, sendingSessionId, abortController } = get();
+
+    // If already sending for THIS session (e.g. SSE still connected), just restore progress
+    if (sending && sendingSessionId === sessionId) {
+      // The SSE or previous attachTask is still running for this session.
+      // Just sync the full progress from worker (in case we missed steps while switched away).
+      try {
+        const status = await api.fetchTaskStatus(sessionId);
+        if (status.status === 'running' && status.progress && status.progress.length > 0) {
+          set({ progressSteps: status.progress });
+        }
+      } catch {
+        // Ignore — the existing SSE/attach will handle it
+      }
+      return;
+    }
 
     // If sending is stuck for a DIFFERENT session, verify it's still running
     if (sending && sendingSessionId && sendingSessionId !== sessionId) {
@@ -215,6 +230,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const otherStatus = await api.fetchTaskStatus(sendingSessionId);
         if (otherStatus.status !== 'running') {
           console.log(`Stale sending state for ${sendingSessionId} (status: ${otherStatus.status}), clearing`);
+          // Abort old connection if any
+          if (abortController) {
+            abortController.abort();
+          }
           set({
             sending: false,
             sendingSessionId: null,
@@ -228,6 +247,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       } catch {
         // Can't reach worker — clear stale state to unblock UI
         console.warn('Cannot verify stale sending state, clearing');
+        if (abortController) {
+          abortController.abort();
+        }
         set({
           sending: false,
           sendingSessionId: null,
@@ -254,11 +276,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       });
 
       // Attach to the running task via polling
+      // Uses onProgressSync to REPLACE progressSteps each poll (not append)
       await new Promise<void>((resolve, reject) => {
         const controller = api.attachTask(sessionId, {
-          onProgress: (text) => {
-            set((s) => ({
-              progressSteps: [...s.progressSteps, text],
+          onProgressSync: (steps) => {
+            set(() => ({
+              progressSteps: steps,
             }));
           },
           onDone: () => resolve(),
@@ -360,8 +383,12 @@ async function _pollTaskStatus(
           return false;
         }
       }
-      // status === 'running' — keep polling
-      if (status.progress_count) {
+      // status === 'running' — keep polling, sync progress
+      if (status.progress && status.progress.length > 0) {
+        set(() => ({
+          progressSteps: status.progress!,
+        }));
+      } else if (status.progress_count) {
         set(() => ({
           progressSteps: [`⏳ 任务后台执行中... (${status.progress_count} 步)`],
         }));

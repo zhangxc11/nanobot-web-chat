@@ -91,22 +91,22 @@ export async function killTask(sessionId: string): Promise<{ status: string; mes
 
 // ── Task Attach (SSE) ──
 
+export interface AttachCallbacks {
+  /** Called with the FULL progress list each poll (replaces, not appends) */
+  onProgressSync: (steps: string[]) => void;
+  onDone: () => void;
+  onError: (message: string) => void;
+}
+
 /**
- * Attach to a running task's SSE stream (for recovering after page refresh).
- * Reuses the same StreamCallbacks interface as sendMessageStream.
+ * Attach to a running task by polling task-status until completion.
+ * Uses onProgressSync to deliver the full progress list each poll,
+ * so the caller can replace (not append) the displayed steps.
  */
 export function attachTask(
   sessionId: string,
-  callbacks: StreamCallbacks,
+  callbacks: AttachCallbacks,
 ): AbortController {
-  // We reuse sendMessageStream's SSE parsing by connecting to task-status
-  // But actually, we need a dedicated attach endpoint.
-  // For now, use the same execute-stream endpoint which auto-attaches to existing tasks.
-  // The worker's execute-stream already handles "task already running → attach" case.
-  // We just need to send a dummy message that won't start a new task.
-  // 
-  // Actually, the simplest approach: poll task-status until done.
-  // This avoids needing a new SSE endpoint.
   const controller = new AbortController();
 
   (async () => {
@@ -115,6 +115,10 @@ export function attachTask(
         const status = await fetchTaskStatus(sessionId);
         
         if (status.status === 'done') {
+          // Final sync of progress before done
+          if (status.progress && status.progress.length > 0) {
+            callbacks.onProgressSync(status.progress);
+          }
           callbacks.onDone();
           return;
         }
@@ -128,9 +132,12 @@ export function attachTask(
           return;
         }
         
-        // Still running — report progress
-        if (status.progress_count) {
-          callbacks.onProgress(`⏳ 任务执行中... (${status.progress_count} 步)`);
+        // Still running — sync full progress list
+        if (status.progress && status.progress.length > 0) {
+          callbacks.onProgressSync(status.progress);
+        } else if (status.progress_count) {
+          // Fallback: gateway restarted, no full progress available
+          callbacks.onProgressSync([`⏳ 任务后台执行中... (${status.progress_count} 步)`]);
         }
         
         // Wait before next poll
