@@ -89,6 +89,21 @@ export async function killTask(sessionId: string): Promise<{ status: string; mes
   return res.json();
 }
 
+// ── Task Inject (user message injection during execution) ──
+
+export async function injectMessage(sessionId: string, message: string): Promise<{ status: string; message?: string }> {
+  const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/task-inject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ status: 'error', message: `HTTP ${res.status}` }));
+    return data;
+  }
+  return res.json();
+}
+
 // ── Task Attach (SSE) ──
 
 export interface AttachCallbacks {

@@ -782,12 +782,116 @@ session_manager = SessionManager(config.workspace_path)  # 传入 workspace root
 
 ---
 
+## 二十、工具调用间隙用户消息注入（原 Backlog #10）
+
+> 2026-02-26 从 Backlog 提升为正式需求。探索性功能，需在独立分支验证后合并。
+
+### Issue #25：任务执行过程中无法补充信息或纠正方向
+
+**现象**：
+1. 用户发送消息后，nanobot 开始执行工具调用循环（可能数十轮）
+2. 执行过程中用户发现方向偏离预期，或需要补充关键信息
+3. 当前只能等待任务完成或强制停止（Issue #8），无法在中途介入
+4. 强制停止会丢失已执行的工具调用成果，浪费 token
+
+**期望**：
+1. 任务执行过程中，用户可以在输入框中输入补充信息
+2. 输入的信息在**工具调用间隙**（当前轮次所有工具执行完毕、下一次 LLM 调用前）作为 `user` 消息插入到消息列表
+3. LLM 在下一轮调用时看到这条补充信息，据此调整后续行为
+4. 支持所有渠道：Web UI、CLI、IM（Telegram/Feishu 等）
+
+**使用场景示例**：
+
+```
+用户: 帮我重构 utils.py，把所有函数加上类型注解
+  ↳ read_file("utils.py")
+  ↳ read_file → def parse_data(raw): ...
+  ↳ write_file("utils.py")                    ← 用户发现在改错文件
+  
+用户(注入): 等一下，我说的是 src/utils.py 不是根目录的
+  
+  ↳ read_file("src/utils.py")                 ← LLM 看到补充信息后纠正
+  ↳ ...
+```
+
+**交互设计（Web UI）**：
+
+```
+任务执行中的输入框状态：
+┌─────────────────────────────────────────────┐
+│  [输入补充信息...]          [📝 注入]  [■ 停止] │
+└─────────────────────────────────────────────┘
+```
+
+- 任务执行中，输入框**不禁用**（当前行为是禁用）
+- 发送按钮变为"📝 注入"按钮（区别于普通发送）
+- 停止按钮保持不变
+- 注入的消息在 ProgressIndicator 中显示为 `📝 用户补充: xxx`
+
+**技术方案**：
+
+#### 1. nanobot 核心层
+
+**AgentCallbacks 新增方法**：
+```python
+async def check_user_input(self) -> str | None:
+    """Check if user has pending input to inject.
+    
+    Called between tool execution rounds (after all tools in current round
+    complete, before next LLM call). Must be non-blocking.
+    Returns user text if available, None otherwise.
+    """
+    return None
+```
+
+**agent loop 改动**（`_run_agent_loop`）：
+- 在每轮工具调用完成后、下一次 `provider.chat()` 前调用 `callbacks.check_user_input()`
+- 如果返回非 None，将其作为 `user` 消息追加到 messages 列表
+- 同步持久化到 JSONL + 通知 `on_progress`
+
+#### 2. Worker 层
+
+- `WorkerCallbacks` 实现 `check_user_input()`：从线程安全队列取消息
+- 新增 `POST /tasks/<key>/inject` 端点：接收前端发送的用户注入消息，放入队列
+- 新增 task 字段 `_inject_queue: queue.Queue`
+
+#### 3. Gateway 层
+
+- 新增 `POST /api/sessions/:id/task-inject` 路由：转发到 Worker
+
+#### 4. 前端
+
+- 任务执行中输入框可用，发送按钮变为"注入"模式
+- 调用 `POST /api/sessions/:id/task-inject` 发送注入消息
+- ProgressIndicator 显示注入消息
+
+#### 5. IM 渠道适配
+
+- IM 渠道（Telegram/Feishu）在任务执行中收到的新消息，通过 bus 的 inbound 队列缓冲
+- agent loop 的 `check_user_input` 从 bus 队列中取消息
+- 需要在 `_process_message` 中传递 bus 引用给 callbacks
+
+**风险评估**：
+
+| 风险 | 级别 | 说明 | 缓解措施 |
+|------|------|------|----------|
+| LLM 上下文混乱 | ⚠️ 中 | 工具调用中间插入 user 消息，LLM 可能困惑 | 消息内容加前缀标记如 `[用户补充]`，帮助 LLM 理解上下文 |
+| 时序竞争 | ⚠️ 中 | 用户输入可能在工具执行中到达 | 使用队列缓冲，只在安全插入点（工具执行完毕后）检查 |
+| 多条注入 | 🟡 低 | 用户可能连续注入多条消息 | 队列支持多条，每轮间隙全部取出合并 |
+| JSONL 一致性 | 🟡 低 | 注入的 user 消息需要正确持久化 | 复用现有 `append_message` 机制 |
+| Token 浪费 | 🟡 低 | 注入消息增加上下文长度 | 注入消息通常很短，影响可忽略 |
+
+**实施策略**：
+- nanobot 仓库: `feat/user-inject` 分支
+- web-chat 仓库: `feat/user-inject` 分支
+- 验证有效后合并回各自主分支
+
+---
+
 ### 手动维护的backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
 
-
-10、【新需求】在工作过程中，输入用户指令的可能性，比如说用户要补充信息，或者看到当前执行的情况已经不符合预期了，可以在命令行中输入信息，这个时候输入的信息，可以在工具调用的间隙，作为user信息补充插入到对llm的调用过程。对于这个需求，尝试分析实现的可能性和风险。如果可以，尝试实现并试用，有效，就可以作为正式的功能。由于这个功能有一定的探索性，对web和nanobot都有影响，单独在一个工作过程实现，实现过程中，在两个仓库都需要单独的分支，ok了在合并回主分支。
 11、【新需求】目前的worker没有考虑并发支持，所以在前端限制了只有一个session可以发起命令。尝试给worker增加并发支持，增加好之后，前端在session的限制可以打开，每个session可以独立同时提交任务。这个涉及worker修改，也需要独立在一次交互任务中实现。
 
 *本文档将随需求迭代持续更新。*

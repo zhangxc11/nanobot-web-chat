@@ -5,7 +5,7 @@ import styles from './ChatInput.module.css';
 
 export default function ChatInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { sending, sendingSessionId, sendMessage, cancelTask, draftBySession, setDraft } = useMessageStore();
+  const { sending, sendingSessionId, sendMessage, injectMessage, cancelTask, draftBySession, setDraft } = useMessageStore();
   const { activeSessionId } = useSessionStore();
 
   // Get draft text for current session
@@ -45,15 +45,23 @@ export default function ChatInput() {
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || !activeSessionId || sending) return;
+    if (!trimmed || !activeSessionId) return;
+
     // Clear draft for this session
     setDraft(activeSessionId, '');
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-    await sendMessage(activeSessionId, trimmed);
-  }, [text, activeSessionId, sending, sendMessage, setDraft]);
+
+    if (isCurrentSessionSending) {
+      // Inject mode: send as supplementary input to running task
+      await injectMessage(trimmed);
+    } else if (!sending) {
+      // Normal send mode
+      await sendMessage(activeSessionId, trimmed);
+    }
+  }, [text, activeSessionId, sending, isCurrentSessionSending, sendMessage, injectMessage, setDraft]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && e.shiftKey) {
@@ -63,7 +71,8 @@ export default function ChatInput() {
   };
 
   const disabled = !activeSessionId;
-  const inputDisabled = disabled || sending;
+  // Input is disabled only when another session is running a task
+  const inputDisabled = disabled || isOtherSessionSending;
 
   // Determine placeholder text
   let placeholder = '输入消息... (Shift+Enter 发送, Enter 换行)';
@@ -72,7 +81,7 @@ export default function ChatInput() {
   } else if (isOtherSessionSending) {
     placeholder = '其他对话正在执行任务，请等待完成...';
   } else if (isCurrentSessionSending) {
-    placeholder = '任务执行中...';
+    placeholder = '输入补充信息... (Shift+Enter 注入)';
   }
 
   return (
@@ -89,12 +98,22 @@ export default function ChatInput() {
           disabled={inputDisabled}
         />
         {isCurrentSessionSending ? (
-          <button
-            className={`${styles.sendButton} ${styles.stopButton}`}
-            onClick={cancelTask}
-          >
-            ■ 停止
-          </button>
+          <div className={styles.actionButtons}>
+            <button
+              className={`${styles.sendButton} ${styles.injectButton}`}
+              onClick={handleSend}
+              disabled={!text.trim()}
+              title="注入补充信息到执行中的任务"
+            >
+              📝 注入
+            </button>
+            <button
+              className={`${styles.sendButton} ${styles.stopButton}`}
+              onClick={cancelTask}
+            >
+              ■ 停止
+            </button>
+          </div>
         ) : (
           <button
             className={styles.sendButton}

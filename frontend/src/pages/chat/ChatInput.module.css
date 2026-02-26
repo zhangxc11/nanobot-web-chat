@@ -70,3 +70,24 @@
 .stopButton:hover {
   background: #c0392b;
 }
+
+.actionButtons {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.injectButton {
+  background: #2ecc71;
+  font-size: 13px;
+  padding: 10px 14px;
+}
+
+.injectButton:hover:not(:disabled) {
+  background: #27ae60;
+}
+
+.injectButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

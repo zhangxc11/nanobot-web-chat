@@ -22,6 +22,7 @@ interface MessageStore {
   loadMessages: (sessionId: string) => Promise<void>;
   loadMoreMessages: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, content: string) => Promise<void>;
+  injectMessage: (content: string) => Promise<void>;
   cancelTask: () => Promise<void>;
   checkRunningTask: (sessionId: string) => Promise<void>;
   clearMessages: () => void;
@@ -162,6 +163,28 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           error: `⚠️ ${errorMsg}`,
         });
       }
+    }
+  },
+
+  injectMessage: async (content) => {
+    const { sending, sendingSessionId } = get();
+    if (!sending || !sendingSessionId) {
+      console.warn('Cannot inject: no running task');
+      return;
+    }
+
+    try {
+      const result = await api.injectMessage(sendingSessionId, content);
+      if (result.status === 'injected') {
+        // Show optimistic inject message in progress
+        set((s) => ({
+          progressSteps: [...s.progressSteps, { text: `📝 User: ${content.slice(0, 80)}`, type: 'user_inject' }],
+        }));
+      } else {
+        console.warn('Inject failed:', result.message);
+      }
+    } catch (err) {
+      console.warn('Inject error:', err);
     }
   },
 

@@ -372,6 +372,16 @@
   font-style: italic;
 }
 
+/* ── Progress User Inject ── */
+
+.progressUserInject {
+  background: rgba(46, 204, 113, 0.1);
+  border-left: 2px solid #2ecc71;
+  padding-left: 8px;
+  margin-left: 4px;
+  border-radius: 0 4px 4px 0;
+}
+
 /* ── Progress Tool Result (expandable) ── */
 
 .progressToolResult {

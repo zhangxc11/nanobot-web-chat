@@ -19,6 +19,7 @@ import http.server
 import json
 import logging
 import os
+import queue
 import socketserver
 import sys
 import threading
@@ -140,6 +141,7 @@ def _run_task_sdk(session_key: str, message: str):
         '_sse_lock': threading.Lock(),
         '_usage': None,
         '_async_task': None,  # asyncio.Task for cancellation
+        '_inject_queue': queue.Queue(),  # Thread-safe queue for user injection
     }
     with _tasks_lock:
         _tasks[session_key] = task
@@ -172,6 +174,25 @@ def _run_task_sdk(session_key: str, message: str):
                     'name': tool_name,
                     'content': content,
                 })
+
+            elif role == 'user':
+                # Injected user message — show in progress
+                content = message.get('content', '')
+                # Strip the prefix for display
+                display = content.replace('[User interjection during execution]\n', '')
+                progress_text = f"📝 User: {display[:80]}"
+                task['progress'].append(progress_text)
+                _notify_sse(task, 'progress', {
+                    'text': progress_text,
+                    'type': 'user_inject',
+                })
+
+        async def check_user_input(self) -> str | None:
+            """Non-blocking check for pending user injection messages."""
+            try:
+                return task['_inject_queue'].get_nowait()
+            except queue.Empty:
+                return None
 
         async def on_usage(self, usage: dict) -> None:
             task['_usage'] = {
@@ -293,6 +314,10 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             session_key = path[7:-5]
             session_key = session_key.replace('%3A', ':').replace('%3a', ':')
             self._handle_kill_task(session_key)
+        elif path.startswith('/tasks/') and path.endswith('/inject'):
+            session_key = path[7:-7]
+            session_key = session_key.replace('%3A', ':').replace('%3a', ':')
+            self._handle_inject(session_key)
         else:
             self._send_json({'error': 'Not found'}, 404)
 
@@ -458,6 +483,40 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             logger.warning(f"No future to cancel: session={session_key}")
 
         self._send_json({'status': 'cancelled', 'message': 'Task cancellation requested'})
+
+    # ── User message injection ──
+
+    def _handle_inject(self, session_key):
+        """POST /tasks/<session_key>/inject — inject user message into running task."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            self._send_json({'error': 'Invalid JSON'}, 400)
+            return
+
+        message = data.get('message', '').strip()
+        if not message:
+            self._send_json({'error': 'Empty message'}, 400)
+            return
+
+        with _tasks_lock:
+            task = _tasks.get(session_key)
+
+        if not task:
+            self._send_json({'status': 'unknown', 'message': 'No task found'}, 404)
+            return
+
+        if task['status'] != 'running':
+            self._send_json({'status': task['status'], 'message': 'Task not running'}, 409)
+            return
+
+        # Put message into the inject queue — will be picked up by check_user_input()
+        task['_inject_queue'].put(message)
+        logger.info(f"Injected message into task: session={session_key}, message={message[:80]}...")
+
+        self._send_json({'status': 'injected', 'message': 'Message queued for injection'})
 
     # ── Task status query ──
 

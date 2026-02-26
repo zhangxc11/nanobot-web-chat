@@ -47,6 +47,15 @@ function ProgressStepItem({ step }: { step: ProgressStep }) {
     );
   }
 
+  if (step.type === 'user_inject') {
+    // User injected message: "📝 User: message"
+    return (
+      <div className={`${styles.progressStep} ${styles.progressUserInject}`}>
+        <span className={styles.progressText}>{step.text}</span>
+      </div>
+    );
+  }
+
   // Thinking text — no ↳ prefix, rendered as plain text with muted style
   return (
     <div className={styles.progressStep}>

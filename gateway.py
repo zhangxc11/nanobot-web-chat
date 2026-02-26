@@ -200,6 +200,11 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._handle_kill_task(route_params['id'])
             return
 
+        route_params = self._match_route(path, '/api/sessions/:id/task-inject')
+        if route_params:
+            self._handle_inject_message(route_params['id'])
+            return
+
         self._send_json({'error': 'Not found'}, 404)
 
     # ── PUT routes ──
@@ -884,6 +889,43 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'status': 'error', 'message': 'Worker unavailable'}, 502)
         except Exception as e:
             logger.error(f"Task kill error: {e}")
+            self._send_json({'status': 'error', 'message': str(e)}, 500)
+
+    def _handle_inject_message(self, session_id):
+        """POST /api/sessions/:id/task-inject — forward inject request to worker."""
+        data = self._read_body()
+        message = data.get('message', '').strip()
+        if not message:
+            self._send_json({'error': 'Empty message'}, 400)
+            return
+
+        session_key = self._get_session_key(session_id)
+        encoded_key = urllib.parse.quote(session_key, safe='')
+        logger.info(f"Inject message into task: session={session_id}, message={message[:80]}...")
+
+        try:
+            body = json.dumps({'message': message}).encode('utf-8')
+            req = urllib.request.Request(
+                f'{WORKER_URL}/tasks/{encoded_key}/inject',
+                data=body,
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                result = json.loads(resp.read().decode('utf-8'))
+            self._send_json(result)
+        except urllib.error.HTTPError as e:
+            body = e.read().decode('utf-8', errors='replace')
+            try:
+                result = json.loads(body)
+            except Exception:
+                result = {'status': 'error', 'message': body}
+            self._send_json(result, e.code)
+        except urllib.error.URLError as e:
+            logger.error(f"Worker unavailable for inject: {e.reason}")
+            self._send_json({'status': 'error', 'message': 'Worker unavailable'}, 502)
+        except Exception as e:
+            logger.error(f"Inject error: {e}")
             self._send_json({'status': 'error', 'message': str(e)}, 500)
 
     def _handle_send_message(self, session_id):
