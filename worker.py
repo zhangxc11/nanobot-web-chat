@@ -195,6 +195,11 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_execute()
         elif path == '/execute-stream':
             self._handle_execute_stream()
+        elif path.startswith('/tasks/') and path.endswith('/kill'):
+            # POST /tasks/<key>/kill
+            session_key = path[7:-5]  # between "/tasks/" and "/kill"
+            session_key = session_key.replace('%3A', ':').replace('%3a', ':')
+            self._handle_kill_task(session_key)
         else:
             self._send_json({'error': 'Not found'}, 404)
 
@@ -343,6 +348,52 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             with task['_sse_lock']:
                 if sse_writer in task['_sse_clients']:
                     task['_sse_clients'].remove(sse_writer)
+
+    # ── Task kill ──
+
+    def _handle_kill_task(self, session_key):
+        """POST /tasks/<session_key>/kill — kill a running task."""
+        with _tasks_lock:
+            task = _tasks.get(session_key)
+
+        if not task:
+            self._send_json({'status': 'unknown', 'message': 'No task found'})
+            return
+
+        if task['status'] != 'running':
+            self._send_json({'status': task['status'], 'message': 'Task not running'})
+            return
+
+        pid = task.get('pid')
+        if pid:
+            try:
+                import signal
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+                logger.info(f"Killed task: session={session_key}, PID={pid}")
+            except ProcessLookupError:
+                logger.warning(f"Process already gone: PID={pid}")
+            except Exception as e:
+                logger.error(f"Failed to kill PID={pid}: {e}")
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except Exception:
+                    pass
+
+        task['status'] = 'error'
+        task['error'] = 'Killed by user'
+        task['finished_at'] = datetime.now().isoformat()
+        task['_finished_ts'] = time.time()
+
+        # Notify SSE clients
+        with task['_sse_lock']:
+            for sse_fn in task['_sse_clients']:
+                try:
+                    sse_fn('error', {'message': 'Task killed by user'})
+                except Exception:
+                    pass
+            task['_sse_clients'] = []
+
+        self._send_json({'status': 'killed', 'message': 'Task killed'})
 
     # ── Task status query ──
 

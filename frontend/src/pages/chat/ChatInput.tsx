@@ -6,8 +6,13 @@ import styles from './ChatInput.module.css';
 export default function ChatInput() {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { sending, sendMessage } = useMessageStore();
+  const { sending, sendingSessionId, sendMessage, cancelTask } = useMessageStore();
   const { activeSessionId } = useSessionStore();
+
+  // Is the current session the one with the running task?
+  const isCurrentSessionSending = sending && sendingSessionId === activeSessionId;
+  // Is another session running a task? (disable input but don't show stop button)
+  const isOtherSessionSending = sending && sendingSessionId !== null && sendingSessionId !== activeSessionId;
 
   // Auto-focus when active session changes
   useEffect(() => {
@@ -47,6 +52,17 @@ export default function ChatInput() {
   };
 
   const disabled = !activeSessionId;
+  const inputDisabled = disabled || sending;
+
+  // Determine placeholder text
+  let placeholder = '输入消息... (Enter 发送, Shift+Enter 换行)';
+  if (disabled) {
+    placeholder = '请先选择或创建对话';
+  } else if (isOtherSessionSending) {
+    placeholder = '其他对话正在执行任务，请等待完成...';
+  } else if (isCurrentSessionSending) {
+    placeholder = '任务执行中...';
+  }
 
   return (
     <div className={styles.inputArea}>
@@ -54,20 +70,29 @@ export default function ChatInput() {
         <textarea
           ref={textareaRef}
           className={styles.input}
-          placeholder={disabled ? '请先选择或创建对话' : '输入消息... (Enter 发送, Shift+Enter 换行)'}
+          placeholder={placeholder}
           rows={1}
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          disabled={disabled || sending}
+          disabled={inputDisabled}
         />
-        <button
-          className={styles.sendButton}
-          onClick={handleSend}
-          disabled={disabled || sending || !text.trim()}
-        >
-          {sending ? '发送中...' : '发送'}
-        </button>
+        {isCurrentSessionSending ? (
+          <button
+            className={`${styles.sendButton} ${styles.stopButton}`}
+            onClick={cancelTask}
+          >
+            ■ 停止
+          </button>
+        ) : (
+          <button
+            className={styles.sendButton}
+            onClick={handleSend}
+            disabled={inputDisabled || !text.trim()}
+          >
+            发送
+          </button>
+        )}
       </div>
     </div>
   );

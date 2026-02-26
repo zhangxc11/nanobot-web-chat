@@ -78,6 +78,74 @@ export async function fetchTaskStatus(sessionId: string): Promise<TaskStatus> {
   return res.json();
 }
 
+// ── Task Kill ──
+
+export async function killTask(sessionId: string): Promise<{ status: string; message?: string }> {
+  const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/task-kill`, {
+    method: 'POST',
+  });
+  if (!res.ok) return { status: 'error', message: `HTTP ${res.status}` };
+  return res.json();
+}
+
+// ── Task Attach (SSE) ──
+
+/**
+ * Attach to a running task's SSE stream (for recovering after page refresh).
+ * Reuses the same StreamCallbacks interface as sendMessageStream.
+ */
+export function attachTask(
+  sessionId: string,
+  callbacks: StreamCallbacks,
+): AbortController {
+  // We reuse sendMessageStream's SSE parsing by connecting to task-status
+  // But actually, we need a dedicated attach endpoint.
+  // For now, use the same execute-stream endpoint which auto-attaches to existing tasks.
+  // The worker's execute-stream already handles "task already running → attach" case.
+  // We just need to send a dummy message that won't start a new task.
+  // 
+  // Actually, the simplest approach: poll task-status until done.
+  // This avoids needing a new SSE endpoint.
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      while (!controller.signal.aborted) {
+        const status = await fetchTaskStatus(sessionId);
+        
+        if (status.status === 'done') {
+          callbacks.onDone();
+          return;
+        }
+        if (status.status === 'error') {
+          callbacks.onError(status.error || status.message || 'Task failed');
+          return;
+        }
+        if (status.status === 'unknown') {
+          // Task not found — might have already completed and been cleaned up
+          callbacks.onDone();
+          return;
+        }
+        
+        // Still running — report progress
+        if (status.progress_count) {
+          callbacks.onProgress(`⏳ 任务执行中... (${status.progress_count} 步)`);
+        }
+        
+        // Wait before next poll
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        return;
+      }
+      callbacks.onError(err instanceof Error ? err.message : '网络错误');
+    }
+  })();
+
+  return controller;
+}
+
 // ── SSE Streaming ──
 
 export interface StreamCallbacks {

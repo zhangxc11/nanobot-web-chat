@@ -42,8 +42,9 @@ function ProgressIndicator({ steps, recovering }: { steps: string[]; recovering:
 }
 
 export default function MessageList() {
-  const { messages, loading, hasMore, sending, error, progressSteps, recovering } = useMessageStore();
+  const { messages, loading, hasMore, sending, sendingSessionId, error, progressSteps, recovering } = useMessageStore();
   const { activeSessionId } = useSessionStore();
+  const isCurrentSessionSending = sending && sendingSessionId === activeSessionId;
   const bottomRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -51,6 +52,7 @@ export default function MessageList() {
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const loadMoreMessages = useMessageStore((s) => s.loadMoreMessages);
   const clearMessages = useMessageStore((s) => s.clearMessages);
+  const checkRunningTask = useMessageStore((s) => s.checkRunningTask);
 
   // Track whether the current load is an initial load (vs loadMore)
   const isInitialLoadRef = useRef(false);
@@ -60,10 +62,12 @@ export default function MessageList() {
     if (activeSessionId) {
       isInitialLoadRef.current = true;
       loadMessages(activeSessionId);
+      // Check if there's a running task for this session (e.g. after page refresh)
+      checkRunningTask(activeSessionId);
     } else {
       clearMessages();
     }
-  }, [activeSessionId, loadMessages, clearMessages]);
+  }, [activeSessionId, loadMessages, clearMessages, checkRunningTask]);
 
   // Auto-scroll to bottom on initial load or when new messages are appended
   const prevMsgCountRef = useRef(0);
@@ -96,10 +100,10 @@ export default function MessageList() {
 
   // Auto-scroll when new progress steps arrive or sending state changes
   useEffect(() => {
-    if (sending) {
+    if (isCurrentSessionSending) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [sending, progressSteps]);
+  }, [isCurrentSessionSending, progressSteps]);
 
   // IntersectionObserver for infinite scroll (load older messages)
   const handleLoadMore = useCallback(() => {
@@ -179,7 +183,7 @@ export default function MessageList() {
           // assistant-turn: render compactly
           return <AssistantTurnGroup key={`turn-${idx}`} messages={group.messages} />;
         })}
-        {sending && <ProgressIndicator steps={progressSteps} recovering={recovering} />}
+        {isCurrentSessionSending && <ProgressIndicator steps={progressSteps} recovering={recovering} />}
         {error && messages.length > 0 && (
           <div className={styles.errorBanner}>
             ⚠️ {error}

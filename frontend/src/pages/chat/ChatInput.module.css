@@ -62,3 +62,11 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.stopButton {
+  background: #e74c3c;
+}
+
+.stopButton:hover {
+  background: #c0392b;
+}

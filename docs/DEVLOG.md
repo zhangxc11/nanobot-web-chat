@@ -25,6 +25,7 @@
 | Phase 14: 功能模块 v2.0 — 配置/记忆/Skill | 🔜 进行中 | main |
 | Phase 15: Bug 修复 — SSE 断开后前端误判任务完成 | ✅ 已完成 | main |
 | Phase 16: Bug 修复 — 消息 timestamp 不准确 | ✅ 已完成 | main (nanobot core) |
+| Phase 17: 任务执行体验优化 (Issue #7/#8/#9) | ✅ 已完成 | main |
 
 ---
 
@@ -388,6 +389,60 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 - **T14.7** 后端 API: Skills 列表、详情、目录树、文件查看
 - **T14.8** 前端 SkillsPage：左侧 Skill 列表 + 右侧详情 + 目录树 + 文件查看
 - **T14.9** 测试 + 提交
+
+---
+
+## Phase 17: 任务执行体验优化 (Issue #7/#8/#9) ✅
+
+### 需求
+1. **Issue #7**: 切换 session 时执行进度不应跟着切换，其他 session 禁止发送
+2. **Issue #8**: 添加强制停止按钮
+3. **Issue #9**: 刷新页面后恢复任务执行状态
+4. **Bug**: 后台执行超时后，前端 `sending` 状态卡住导致无法发送新消息
+
+### 实施记录
+
+#### T17.1 前端 messageStore: 任务绑定 session + 全局锁 ✅
+- 新增 `sendingSessionId: string | null` — 记录哪个 session 正在执行任务
+- `sendMessage` 时设置 `sendingSessionId`
+- MessageList ProgressIndicator 只在 `sendingSessionId === activeSessionId` 时显示
+- `clearMessages` 不清除 sending 状态（任务可能在其他 session 执行中）
+
+#### T17.2 后端 Worker: kill 接口 ✅
+- 新增 `POST /tasks/<key>/kill` — 用 `os.killpg` 杀掉 nanobot 进程组
+- 更新 task status 为 error + 'Killed by user'
+- 通知 SSE 客户端任务已终止
+
+#### T17.3 后端 Gateway: kill 转发 ✅
+- 新增 `POST /api/sessions/:id/task-kill` — 转发到 Worker
+
+#### T17.4 前端: 停止按钮 + api.ts ✅
+- api.ts 新增 `killTask(sessionId)` 和 `attachTask(sessionId, callbacks)`
+- `attachTask` 使用轮询 task-status 实现（避免新增 SSE 端点）
+- ChatInput 改造：
+  - 当前 session 执行中 → 显示红色 "■ 停止" 按钮
+  - 其他 session 执行中 → 显示 "其他对话正在执行任务" placeholder，禁用输入
+  - `cancelTask()` → abort SSE + kill 后端任务 + 重载消息
+
+#### T17.5-T17.7 页面刷新恢复任务状态 ✅
+- `checkRunningTask(sessionId)` 在每次切换 session 时调用
+- 检查 task-status API，如果 running 则 attach 并恢复 sending 状态
+- 如果 `sending` 卡在另一个 session，自动验证并清除过期状态
+- 解决了"后台超时后发送按钮不能点"的 bug
+
+### Bug 修复: sending 状态卡住
+- **根因**: 后台任务超时/完成后，前端 `sending` 未正确重置
+- **修复**: `checkRunningTask` 在检测到 `sendingSessionId` 不匹配时，主动向 Worker 验证旧任务状态，如果非 running 则清除 sending 锁
+- **兜底**: Worker 不可达时也清除 sending 状态，避免永久卡死
+
+### 改动文件
+- `frontend/src/store/messageStore.ts` — 全面重写，sendingSessionId + cancelTask + checkRunningTask
+- `frontend/src/pages/chat/MessageList.tsx` — isCurrentSessionSending 条件渲染
+- `frontend/src/pages/chat/ChatInput.tsx` — 停止按钮 + 多状态 placeholder
+- `frontend/src/pages/chat/ChatInput.module.css` — stopButton 样式
+- `frontend/src/services/api.ts` — killTask + attachTask
+- `worker.py` — POST /tasks/<key>/kill 端点
+- `gateway.py` — POST /api/sessions/:id/task-kill 转发
 
 ---
 

@@ -178,6 +178,11 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._handle_send_message(route_params['id'])
             return
 
+        route_params = self._match_route(path, '/api/sessions/:id/task-kill')
+        if route_params:
+            self._handle_kill_task(route_params['id'])
+            return
+
         self._send_json({'error': 'Not found'}, 404)
 
     # ── PUT routes ──
@@ -752,6 +757,26 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Task status error: {e}")
             self._send_json({'status': 'unknown', 'message': str(e)}, 500)
+
+    def _handle_kill_task(self, session_id):
+        """POST /api/sessions/:id/task-kill — forward kill request to worker."""
+        session_key = self._get_session_key(session_id)
+        encoded_key = urllib.parse.quote(session_key, safe='')
+        try:
+            req = urllib.request.Request(
+                f'{WORKER_URL}/tasks/{encoded_key}/kill',
+                data=b'',
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            self._send_json(data)
+        except urllib.error.URLError as e:
+            logger.error(f"Worker unavailable for task kill: {e.reason}")
+            self._send_json({'status': 'error', 'message': 'Worker unavailable'}, 502)
+        except Exception as e:
+            logger.error(f"Task kill error: {e}")
+            self._send_json({'status': 'error', 'message': str(e)}, 500)
 
     def _handle_send_message(self, session_id):
         """POST /api/sessions/:id/messages — forward to Worker as SSE stream."""

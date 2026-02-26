@@ -906,4 +906,79 @@ App
 
 ---
 
+## 十二、任务执行体验优化 (v2.1)
+
+### 12.1 问题总结
+
+| # | 问题 | 根因 |
+|---|------|------|
+| 7 | 切换 session 时执行进度跟着切换 | `sending`/`progressSteps` 是全局状态，不绑定 session |
+| 8 | 无法强制停止执行中的任务 | 前端未保存 AbortController，后端无 kill 接口 |
+| 9 | 刷新页面后任务状态丢失 | 页面加载时不检查是否有正在运行的任务 |
+
+### 12.2 设计方案
+
+#### 12.2.1 任务状态绑定 Session (Issue #7)
+
+**messageStore 改动**：
+- 新增 `sendingSessionId: string | null` — 记录正在执行任务的 session
+- `sending` 状态保留，但 ProgressIndicator 只在 `activeSessionId === sendingSessionId` 时显示
+- 切换 session 时不清除 `sending`/`progressSteps`/`sendingSessionId`（任务仍在后台运行）
+- ChatInput 在 `sending && activeSessionId !== sendingSessionId` 时也禁用发送（全局单任务锁）
+
+**MessageList 改动**：
+- ProgressIndicator 的渲染条件从 `sending` 改为 `sending && activeSessionId === sendingSessionId`
+- 其他 session 显示 "有任务正在执行中" 的提示（在 ChatInput 区域）
+
+#### 12.2.2 强制停止功能 (Issue #8)
+
+**前端改动**：
+- messageStore 新增 `abortController: AbortController | null` 和 `cancelTask()` 方法
+- `sendMessage` 中保存 `sendMessageStream` 返回的 AbortController
+- `cancelTask()` 调用 `abortController.abort()` + 调用后端 kill API + 重置状态
+- ChatInput: 发送中时显示停止按钮（■ 图标），点击调用 `cancelTask()`
+
+**后端改动**：
+- Worker 新增 `POST /tasks/:session_key/kill` — 杀掉正在运行的 nanobot 子进程
+- Gateway 新增 `POST /api/sessions/:id/task-kill` — 转发到 Worker
+
+#### 12.2.3 页面刷新后恢复任务状态 (Issue #9)
+
+**前端改动**：
+- messageStore 新增 `checkRunningTask(sessionId)` 方法
+- 页面加载时（`MessageList` 的 `useEffect`），调用 `GET /api/sessions/:id/task-status`
+- 如果返回 `status: 'running'`：
+  1. 设置 `sending=true`, `sendingSessionId=sessionId`
+  2. 调用 Worker 的 `/execute-stream` 附加到已有任务的 SSE（Worker 已支持 attach）
+  3. 通过 Gateway 新增的 `POST /api/sessions/:id/task-attach` 端点实现
+  4. 恢复 ProgressIndicator 显示
+
+**Worker 改动**：
+- 新增 `POST /tasks/:session_key/attach` — 附加 SSE 客户端到已有运行任务
+  - 返回已有 progress + 实时后续进度
+  - 如果任务已完成，直接返回 done/error
+
+**Gateway 改动**：
+- 新增 `POST /api/sessions/:id/task-attach` — SSE 转发到 Worker `/tasks/:key/attach`
+
+### 12.3 API 新增
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/tasks/:key/kill` (Worker) | 杀掉正在运行的 nanobot 子进程 |
+| POST | `/tasks/:key/attach` (Worker) | 附加 SSE 到已有任务 |
+| POST | `/api/sessions/:id/task-kill` (Gateway) | 转发 kill 请求 |
+| POST | `/api/sessions/:id/task-attach` (Gateway) | SSE 转发 attach 请求 |
+
+### 12.4 ChatInput 状态矩阵
+
+| 场景 | 输入框 | 按钮 |
+|------|--------|------|
+| 空闲 | 可输入 | 发送（灰色） |
+| 有文字 | 可输入 | 发送（高亮） |
+| 当前 session 执行中 | 禁用 | ■ 停止（红色） |
+| 其他 session 执行中 | 禁用 | 发送（灰色）+ 提示 |
+
+---
+
 *本文档将随开发进展持续更新。*
