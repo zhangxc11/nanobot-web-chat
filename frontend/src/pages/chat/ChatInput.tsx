@@ -45,7 +45,7 @@ export default function ChatInput() {
   }, [text, activeSessionId, sending, sendMessage]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -55,7 +55,7 @@ export default function ChatInput() {
   const inputDisabled = disabled || sending;
 
   // Determine placeholder text
-  let placeholder = '输入消息... (Enter 发送, Shift+Enter 换行)';
+  let placeholder = '输入消息... (Shift+Enter 发送, Enter 换行)';
   if (disabled) {
     placeholder = '请先选择或创建对话';
   } else if (isOtherSessionSending) {
