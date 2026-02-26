@@ -1,10 +1,64 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { useSessionStore } from '@/store/sessionStore';
+import type { ProgressStep } from '@/types';
 import MessageItem, { groupMessages, AssistantTurnGroup } from './MessageItem';
 import styles from './MessageList.module.css';
 
-function ProgressIndicator({ steps, recovering }: { steps: string[]; recovering: boolean }) {
+/** A single progress step — supports expand/collapse for tool results */
+function ProgressStepItem({ step }: { step: ProgressStep }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (step.type === 'tool_result' && step.content) {
+    // Tool result with expandable detail
+    return (
+      <div className={styles.progressStep}>
+        <span className={styles.progressArrow}>↳</span>
+        <div className={styles.progressToolResult}>
+          <div
+            className={styles.progressToolResultHeader}
+            onClick={() => setExpanded(!expanded)}
+            title="点击展开/折叠详情"
+          >
+            <span className={styles.progressToolName}>{step.name || 'unknown'}</span>
+            <span className={styles.progressToolSep}>→</span>
+            {!expanded && (
+              <span className={styles.progressToolSummary}>
+                {_firstLine(step.content, 80)}
+              </span>
+            )}
+            <span className={styles.progressToolExpand}>{expanded ? '▾' : '▸'}</span>
+          </div>
+          {expanded && (
+            <pre className={styles.progressToolDetail}>{step.content}</pre>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Normal progress step (thinking text or tool hint)
+  return (
+    <div className={styles.progressStep}>
+      <span className={styles.progressArrow}>↳</span>
+      <span className={styles.progressText}>{step.text}</span>
+    </div>
+  );
+}
+
+/** Extract first meaningful line, truncated */
+function _firstLine(content: string, maxLen: number): string {
+  if (!content) return '(无输出)';
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed) {
+      return trimmed.length <= maxLen ? trimmed : trimmed.substring(0, maxLen) + '…';
+    }
+  }
+  return content.length <= maxLen ? content : content.substring(0, maxLen) + '…';
+}
+
+function ProgressIndicator({ steps, recovering }: { steps: ProgressStep[]; recovering: boolean }) {
   return (
     <div className={`${styles.message} ${styles.assistantMessage}`}>
       <div className={styles.progressBubble}>
@@ -17,10 +71,7 @@ function ProgressIndicator({ steps, recovering }: { steps: string[]; recovering:
         ) : (
           <div className={styles.progressSteps}>
             {steps.map((step, i) => (
-              <div key={i} className={styles.progressStep}>
-                <span className={styles.progressArrow}>↳</span>
-                <span className={styles.progressText}>{step}</span>
-              </div>
+              <ProgressStepItem key={i} step={step} />
             ))}
             {recovering ? (
               <div className={styles.progressStep}>

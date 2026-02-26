@@ -1,11 +1,11 @@
-// Message state store — v18 (fix progress recovery on session switch)
+// Message state store — v19 (rich progress steps with tool results)
 import { create } from 'zustand';
-import type { Message } from '../types';
+import type { Message, ProgressStep } from '../types';
 import * as api from '../services/api';
 import { useSessionStore } from './sessionStore';
 
 // Build version marker for cache busting
-const _BUILD_VERSION = '18.0';
+const _BUILD_VERSION = '19.0';
 console.debug('[messageStore] version:', _BUILD_VERSION);
 
 interface MessageStore {
@@ -15,7 +15,7 @@ interface MessageStore {
   sending: boolean;
   sendingSessionId: string | null;   // which session owns the running task
   error: string | null;
-  progressSteps: string[];           // real-time progress steps from SSE
+  progressSteps: ProgressStep[];           // real-time progress steps from SSE
   recovering: boolean;               // polling task status after SSE disconnect
   abortController: AbortController | null;  // for cancelling SSE fetch
   draftBySession: Record<string, string>;   // per-session input draft text
@@ -101,9 +101,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     try {
       await new Promise<void>((resolve, reject) => {
         const controller = api.sendMessageStream(sessionId, content, {
-          onProgress: (text) => {
+          onProgress: (step) => {
             set((s) => ({
-              progressSteps: [...s.progressSteps, text],
+              progressSteps: [...s.progressSteps, step],
             }));
           },
           onDone: () => resolve(),
@@ -218,7 +218,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       try {
         const status = await api.fetchTaskStatus(sessionId);
         if (status.status === 'running' && status.progress && status.progress.length > 0) {
-          set({ progressSteps: status.progress });
+          set({ progressSteps: status.progress.map((text: string) => ({ text })) });
         }
       } catch {
         // Ignore — the existing SSE/attach will handle it
@@ -268,7 +268,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
       // There's a running task for this session — recover state
       // Restore full progress history from backend
-      const restoredSteps = status.progress || [];
+      const restoredSteps = (status.progress || []).map((text: string) => ({ text }));
       set({
         sending: true,
         sendingSessionId: sessionId,
@@ -283,7 +283,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const controller = api.attachTask(sessionId, {
           onProgressSync: (steps) => {
             set(() => ({
-              progressSteps: steps,
+              progressSteps: steps.map((text: string) => ({ text })),
             }));
           },
           onDone: () => resolve(),
@@ -390,11 +390,11 @@ async function _pollTaskStatus(
       // status === 'running' — keep polling, sync progress
       if (status.progress && status.progress.length > 0) {
         set(() => ({
-          progressSteps: status.progress!,
+          progressSteps: status.progress!.map((text: string) => ({ text })),
         }));
       } else if (status.progress_count) {
         set(() => ({
-          progressSteps: [`⏳ 任务后台执行中... (${status.progress_count} 步)`],
+          progressSteps: [{ text: `⏳ 任务后台执行中... (${status.progress_count} 步)` }],
         }));
       }
     } catch {

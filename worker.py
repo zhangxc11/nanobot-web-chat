@@ -97,6 +97,23 @@ _tasks_lock = threading.Lock()
 TASK_TTL = 600    # Keep completed tasks for 10 minutes
 
 
+def _truncate_tool_output(content: str, max_len: int = 80) -> str:
+    """Truncate tool output to a short summary (first meaningful line)."""
+    if not content:
+        return '(无输出)'
+    first_line = ''
+    for line in content.split('\n'):
+        stripped = line.strip()
+        if stripped:
+            first_line = stripped
+            break
+    if not first_line:
+        return content[:max_len] + '…' if len(content) > max_len else content
+    if len(first_line) <= max_len:
+        return first_line
+    return first_line[:max_len] + '…'
+
+
 def _cleanup_old_tasks():
     """Remove completed tasks older than TASK_TTL."""
     now = time.time()
@@ -135,8 +152,23 @@ def _run_task_sdk(session_key: str, message: str):
             _notify_sse(task, 'progress', {'text': text})
 
         async def on_message(self, message: dict) -> None:
-            # Messages are persisted by the core layer; nothing extra needed
-            pass
+            """Forward tool results and assistant thinking text as progress events."""
+            role = message.get('role', '')
+
+            if role == 'tool':
+                # Tool execution result — show as "↳ tool_name → summary"
+                tool_name = message.get('name', 'unknown')
+                content = message.get('content', '')
+                # Truncate to first meaningful line for summary
+                summary = _truncate_tool_output(content, max_len=80)
+                progress_text = f"{tool_name} → {summary}"
+                task['progress'].append(progress_text)
+                _notify_sse(task, 'progress', {
+                    'text': progress_text,
+                    'type': 'tool_result',
+                    'name': tool_name,
+                    'content': content,
+                })
 
         async def on_usage(self, usage: dict) -> None:
             task['_usage'] = {

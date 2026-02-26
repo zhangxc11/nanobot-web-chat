@@ -230,7 +230,7 @@ export async function fetchDailyUsage(days: number = 30): Promise<DailyUsage[]> 
 // ── SSE Streaming ──
 
 export interface StreamCallbacks {
-  onProgress: (text: string) => void;
+  onProgress: (step: import('@/types').ProgressStep) => void;
   onDone: () => void;
   onError: (message: string) => void;
 }
@@ -301,7 +301,12 @@ export function sendMessageStream(
               const parsed = JSON.parse(eventData);
               switch (eventType) {
                 case 'progress':
-                  callbacks.onProgress(parsed.text || '');
+                  callbacks.onProgress({
+                    text: parsed.text || '',
+                    type: parsed.type,
+                    name: parsed.name,
+                    content: parsed.content,
+                  });
                   break;
                 case 'done':
                   receivedDoneOrError = true;
