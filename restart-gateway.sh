@@ -17,6 +17,9 @@ GATEWAY_PORT="${GATEWAY_PORT:-8081}"
 WORKER_PORT="${WORKER_PORT:-8082}"
 WORKER_URL="http://127.0.0.1:${WORKER_PORT}"
 
+# Use nanobot's venv python (requires 3.10+)
+PYTHON="${NANOBOT_PYTHON:-/Users/zhangxingcheng/Documents/code/workspace/nanobot/venv311/bin/python3}"
+
 stop_gateway() {
     local pids
     pids=$(pgrep -f "gateway.py.*--port ${GATEWAY_PORT}" 2>/dev/null || true)
@@ -53,7 +56,7 @@ stop_worker() {
 start_gateway() {
     echo "Starting gateway on port ${GATEWAY_PORT}..."
     cd "$SCRIPT_DIR"
-    python3 gateway.py --port "$GATEWAY_PORT" --worker-url "$WORKER_URL" --daemonize
+    $PYTHON gateway.py --port "$GATEWAY_PORT" --worker-url "$WORKER_URL" --daemonize
     sleep 0.5
     if curl -s "http://127.0.0.1:${GATEWAY_PORT}/api/health" >/dev/null 2>&1; then
         echo "✅ Gateway healthy at http://127.0.0.1:${GATEWAY_PORT}"
@@ -65,7 +68,7 @@ start_gateway() {
 start_worker() {
     echo "Starting worker on port ${WORKER_PORT}..."
     cd "$SCRIPT_DIR"
-    python3 worker.py --port "$WORKER_PORT" --daemonize
+    $PYTHON worker.py --port "$WORKER_PORT" --daemonize
     sleep 0.5
     if curl -s "http://127.0.0.1:${WORKER_PORT}/health" >/dev/null 2>&1; then
         echo "✅ Worker healthy at http://127.0.0.1:${WORKER_PORT}"
