@@ -719,4 +719,28 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 
 ---
 
+## Bug Fix: Session 数据写入错误路径 (2026-02-26 21:24)
+
+> 对应需求 §十八 Issue #23
+
+### 问题
+- **现象**: Web UI 消息执行成功但 session 不记录，刷新/切换后消息消失
+- **根因**: `AgentRunner.from_config()` 传入 `config.workspace_path / "sessions"` 给 `SessionManager`，但 `SessionManager.__init__` 内部又追加 `/sessions`，导致写入路径变成 `sessions/sessions/`（双重嵌套）
+- **发现时间**: Phase 24 SDK 化后首次在 web UI 中实际使用时发现
+
+### 修复
+- nanobot `sdk/runner.py`: `SessionManager(config.workspace_path)` — 传入 workspace root 而非 sessions_dir
+- 恢复 `sessions/sessions/` 下的误写数据到正确位置
+- 清理错误的嵌套目录
+- 重启 Worker 使修复生效
+
+### 验证
+- Worker 重启后发送测试消息，确认 JSONL 写入 `~/.nanobot/workspace/sessions/`（正确）
+- `sessions/sessions/` 不再被创建
+
+### Commits
+- nanobot 核心: `aaaf81d` (fix), `4a4f158` (docs) on local 分支
+
+---
+
 *每次 session 更新此文件后 commit。*

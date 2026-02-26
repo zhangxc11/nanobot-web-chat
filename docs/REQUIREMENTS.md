@@ -694,6 +694,49 @@ Shell 中 `&` 的优先级低于 `&&`，导致 `cd /dir && python3 server.py &` 
 
 ---
 
+## 十八、Bug 修复 — SDK 化后 Session 数据写入错误路径
+
+> 2026-02-26 Phase 24 SDK 化后发现的关键 Bug
+
+### Issue #23：Web UI 消息执行成功但 Session 不记录，刷新后消息消失
+
+**现象**：
+1. 在 web-chat 输入消息，nanobot agent 正常执行（工具调用、回复等都能看到）
+2. 执行完成后，切换 session 或刷新页面，所有消息消失
+3. Session JSONL 文件中只有 metadata 行，没有任何消息记录
+4. Worker 日志显示任务成功完成（如 `Task done: session=webchat:1772111064, steps=104`）
+
+**根因**：
+`AgentRunner.from_config()` 中 `SessionManager` 初始化路径错误：
+
+```python
+# 错误代码（sdk/runner.py）
+sessions_dir = config.workspace_path / "sessions"   # ~/.nanobot/workspace/sessions
+session_manager = SessionManager(sessions_dir)       # 传入 sessions_dir
+
+# SessionManager.__init__（session/manager.py）
+self.sessions_dir = ensure_dir(self.workspace / "sessions")
+# 实际路径 = ~/.nanobot/workspace/sessions/sessions  ← 双重嵌套！
+```
+
+Gateway 创建 session 和读取消息都使用 `~/.nanobot/workspace/sessions/`（正确路径），但 Worker（通过 AgentRunner）写入消息到 `~/.nanobot/workspace/sessions/sessions/`（错误路径），导致 gateway 读不到消息。
+
+**修复**：
+```python
+# 修复后
+session_manager = SessionManager(config.workspace_path)  # 传入 workspace root
+# SessionManager 内部: ~/.nanobot/workspace + /sessions = 正确路径
+```
+
+**影响范围**：
+- 所有通过 SDK 模式（web-chat worker）执行的 session 数据受影响
+- CLI 模式不受影响（CLI 直接使用 `SessionManager(workspace_path)`）
+- Phase 24 SDK 化引入的回归 bug
+
+**修复 Commit**：nanobot 核心 `aaaf81d` on local 分支
+
+---
+
 ### 手动维护的backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
