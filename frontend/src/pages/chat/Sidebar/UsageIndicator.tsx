@@ -38,7 +38,13 @@ export default function UsageIndicator() {
   useEffect(() => {
     loadUsage();
     const timer = setInterval(loadUsage, 60_000);
-    return () => clearInterval(timer);
+    // Also refresh when a message completes (usage-updated event)
+    const onUsageUpdated = () => loadUsage();
+    window.addEventListener('usage-updated', onUsageUpdated);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('usage-updated', onUsageUpdated);
+    };
   }, [loadUsage]);
 
   if (!activeSessionId || !usage || usage.llm_calls === 0) return null;

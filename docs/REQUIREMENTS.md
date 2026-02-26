@@ -549,6 +549,12 @@
 
 **状态**：已知限制，暂不修复。后续可通过 Backlog #6（SDK 方案）统一解决。
 
+### Issue #17 偶尔出现 "unexpected tool_use_id found in tool_result blocks" 错误
+
+— 根因：`get_history()` 的 `memory_window` 截断落在长工具调用链中间，导致孤立的 `tool_result` 消息（对应的 `assistant` 消息在窗口之外）。修复：`get_history()` 对齐逻辑改为优先找 `user` 消息、回退到 `assistant` 消息，永不以 `tool` 消息开头。（nanobot 核心仓库 commit c14804d）
+
+已经解决
+
 ---
 
 ### 手动维护的backlog
@@ -558,6 +564,5 @@
 6、【架构改进】现在worker对nanobot的使用，是通过命令行的工具，它本身不是为被worker调用设计的，以至于需要大量使用stdout，stderr的方式来获取信息，比较麻烦，也容易出问题，可以考虑在nanobot中增加一个专门给worker调用的sdk，这样能更便捷的交互。这个修比较重大，而且涉及worker的调整，在命令行触发的条件下执行。
 7、【新需求】在工作过程中，输入用户指令的可能性，比如说用户要补充信息，或者看到当前执行的情况已经不符合预期了，可以在命令行中输入信息，这个时候输入的信息，可以在工具调用的间隙，作为user信息补充插入到对llm的调用过程。对于这个需求，尝试分析实现的可能性和风险。如果可以，尝试实现并试用，有效，就可以作为正式的功能。由于这个功能有一定的探索性，对web和nanobot都有影响，单独在一个工作过程实现，实现过程中，在两个仓库都需要单独的分支，ok了在合并回主分支。
 8、【新需求】目前的worker没有考虑并发支持，所以在前端限制了只有一个session可以发起命令。尝试给worker增加并发支持，增加好之后，前端在session的限制可以打开，每个session可以独立同时提交任务。这个涉及worker修改，也需要独立在一次交互任务中实现。
-9、【bug】偶尔会出现“Error calling LLM: litellm.BadRequestError: AnthropicException - {"error":{"type":"\u003cnil\u003e","message":"..content.0: unexpected tool_use_id found in tool_result blocks: toolu_01MtBwtqYMG4BBGb4kFN5aQh. Each tool_result block must have a corresponding tool_use block in the previous message. (request id: 202602260907039281569084aJcnKZB) (request id: 20260226090703926530742hBBhRWEa)"},"type":"error"}” 重试能解决，需要看看怎么修复。
 
 *本文档将随需求迭代持续更新。*

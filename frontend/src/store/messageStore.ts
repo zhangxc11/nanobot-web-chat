@@ -114,6 +114,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
       // Task completed normally via SSE — reload messages from JSONL
       await _reloadMessages(sessionId, set);
+      // Trigger usage indicator refresh
+      window.dispatchEvent(new CustomEvent('usage-updated'));
     } catch (err) {
       // Check if this was a user-initiated cancel
       if (err instanceof Error && err.name === 'AbortError') {
@@ -292,6 +294,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
       // Task completed — reload messages
       await _reloadMessages(sessionId, set);
+      // Trigger usage indicator refresh
+      window.dispatchEvent(new CustomEvent('usage-updated'));
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       const isConnectionError = /fetch|network|abort|reset|refused/i.test(errorMsg);
