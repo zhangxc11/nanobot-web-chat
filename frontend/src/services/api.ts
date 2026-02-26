@@ -146,6 +146,40 @@ export function attachTask(
   return controller;
 }
 
+// ── Usage Statistics ──
+
+export interface UsageByModel {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  llm_calls: number;
+}
+
+export interface UsageBySession {
+  session_id: string;
+  summary: string;
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  llm_calls: number;
+  last_used: string;
+}
+
+export interface UsageStats {
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  total_llm_calls: number;
+  by_model: Record<string, UsageByModel>;
+  by_session: UsageBySession[];
+}
+
+export async function fetchUsage(): Promise<UsageStats> {
+  const res = await fetch(`${API_BASE}/usage`);
+  if (!res.ok) throw new Error(`Failed to fetch usage: ${res.status}`);
+  return res.json();
+}
+
 // ── SSE Streaming ──
 
 export interface StreamCallbacks {

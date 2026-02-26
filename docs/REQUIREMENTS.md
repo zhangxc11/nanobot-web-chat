@@ -423,6 +423,15 @@
 2. 显示 ProgressIndicator，通过 SSE 重新连接获取实时进度
 3. 即使无法看到完整的历史进度，也应显示当前的执行状态
 
+### Issue #10：Token 用量统计与展示
+
+**现象**：nanobot provider 层已返回 `usage` 数据（prompt_tokens, completion_tokens, total_tokens），但 agent loop 未累计、未保存，前端无展示。
+
+**期望**：
+1. **后端**：agent loop 累计每次 LLM 调用的 token usage，保存到 session JSONL
+2. **前端**：增加用量展示模块，显示 session 级别和全局级别的 token 用量统计
+3. **数据维度**：prompt_tokens, completion_tokens, total_tokens, 调用次数, 模型名称
+
 ---
 
 *本文档将随需求迭代持续更新。*

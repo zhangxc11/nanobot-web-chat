@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useUIStore } from '@/store/uiStore';
 import { useSessionStore } from '@/store/sessionStore';
 import SessionList from './SessionList';
+import UsageIndicator from './UsageIndicator';
 import styles from './Sidebar.module.css';
 
 export default function Sidebar() {
@@ -36,6 +37,7 @@ export default function Sidebar() {
           <SessionList />
         )}
       </div>
+      <UsageIndicator />
       <div className={styles.footer}>
         <button className={styles.collapseButton} onClick={toggleSidebar}>
           <span>◀</span>

@@ -144,6 +144,10 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_skills()
             return
 
+        if path == '/api/usage':
+            self._handle_get_usage()
+            return
+
         if path.startswith('/api/skills/'):
             self._handle_skill_routes(path)
             return
@@ -535,6 +539,121 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Failed to read memory file {filename}: {e}")
             self._send_json({'error': str(e)}, 500)
+
+    # ── Usage API handler ──
+
+    def _handle_get_usage(self):
+        """GET /api/usage — aggregate token usage across all sessions."""
+        totals = {
+            'total_prompt_tokens': 0,
+            'total_completion_tokens': 0,
+            'total_tokens': 0,
+            'total_llm_calls': 0,
+        }
+        by_model = {}  # model -> {prompt_tokens, completion_tokens, total_tokens, llm_calls}
+        by_session = []  # [{session_id, summary, total_tokens, llm_calls, last_used}]
+
+        if not os.path.isdir(SESSIONS_DIR):
+            self._send_json({**totals, 'by_model': by_model, 'by_session': by_session})
+            return
+
+        for filepath in glob.glob(os.path.join(SESSIONS_DIR, '*.jsonl')):
+            session_id = os.path.basename(filepath).replace('.jsonl', '')
+            session_totals = {
+                'prompt_tokens': 0,
+                'completion_tokens': 0,
+                'total_tokens': 0,
+                'llm_calls': 0,
+            }
+            session_summary = session_id
+            last_used = ''
+
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    first_user_content = ''
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        if obj.get('_type') == 'metadata':
+                            session_summary = (
+                                obj.get('custom_name')
+                                or (obj.get('metadata') or {}).get('custom_name')
+                                or ''
+                            )
+                            continue
+
+                        if obj.get('_type') == 'usage':
+                            pt = obj.get('prompt_tokens', 0)
+                            ct = obj.get('completion_tokens', 0)
+                            tt = obj.get('total_tokens', 0)
+                            lc = obj.get('llm_calls', 0)
+                            model = obj.get('model', 'unknown')
+                            ts = obj.get('timestamp', '')
+
+                            session_totals['prompt_tokens'] += pt
+                            session_totals['completion_tokens'] += ct
+                            session_totals['total_tokens'] += tt
+                            session_totals['llm_calls'] += lc
+
+                            totals['total_prompt_tokens'] += pt
+                            totals['total_completion_tokens'] += ct
+                            totals['total_tokens'] += tt
+                            totals['total_llm_calls'] += lc
+
+                            if model not in by_model:
+                                by_model[model] = {
+                                    'prompt_tokens': 0,
+                                    'completion_tokens': 0,
+                                    'total_tokens': 0,
+                                    'llm_calls': 0,
+                                }
+                            by_model[model]['prompt_tokens'] += pt
+                            by_model[model]['completion_tokens'] += ct
+                            by_model[model]['total_tokens'] += tt
+                            by_model[model]['llm_calls'] += lc
+
+                            if ts > last_used:
+                                last_used = ts
+                            continue
+
+                        # Get first user content for summary fallback
+                        if obj.get('role') == 'user' and not first_user_content:
+                            content = obj.get('content', '')
+                            content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
+                            first_user_content = content[:80] if content else ''
+
+                    if not session_summary:
+                        session_summary = first_user_content or session_id
+
+            except Exception as e:
+                logger.error(f"Failed to read usage from {session_id}: {e}")
+                continue
+
+            if session_totals['llm_calls'] > 0:
+                by_session.append({
+                    'session_id': session_id,
+                    'summary': session_summary,
+                    'total_tokens': session_totals['total_tokens'],
+                    'prompt_tokens': session_totals['prompt_tokens'],
+                    'completion_tokens': session_totals['completion_tokens'],
+                    'llm_calls': session_totals['llm_calls'],
+                    'last_used': last_used,
+                })
+
+        # Sort sessions by total_tokens descending
+        by_session.sort(key=lambda s: s['total_tokens'], reverse=True)
+
+        self._send_json({
+            **totals,
+            'by_model': by_model,
+            'by_session': by_session,
+        })
 
     # ── Skills API handlers ──
 

@@ -981,4 +981,86 @@ App
 
 ---
 
+## 十三、Token 用量统计 (v2.2)
+
+### 13.1 问题描述
+
+nanobot 的 LLM Provider 层已经返回 `usage` 数据（prompt_tokens, completion_tokens, total_tokens），但 agent loop 中未累计、未保存，前端没有展示。
+
+### 13.2 数据流设计
+
+```
+LiteLLM Provider
+  └─ LLMResponse.usage = { prompt_tokens, completion_tokens, total_tokens }
+       │
+Agent Loop (_run_agent_loop)
+  └─ 每次 provider.chat() 后累计 usage
+  └─ 返回 accumulated_usage
+       │
+_process_message
+  └─ 将 usage 保存到 session JSONL（作为 _type: "usage" 记录）
+       │
+Session JSONL
+  └─ { "_type": "usage", "model": "...", "prompt_tokens": N, "completion_tokens": N, "total_tokens": N, "llm_calls": N, "timestamp": "..." }
+       │
+Gateway API
+  └─ GET /api/sessions/:id → 返回 session 级别 usage 汇总
+  └─ GET /api/usage → 返回全局 usage 汇总（所有 session 总和）
+       │
+Frontend
+  └─ 用量展示模块
+```
+
+### 13.3 nanobot 核心改动
+
+**agent/loop.py**：
+- `_run_agent_loop` 中每次 `provider.chat()` 后累计 usage
+- 返回值增加 `usage` 字段
+- `_process_message` 中将 usage 写入 session（新的 `_type: "usage"` JSONL 行）
+
+**Session JSONL 新增记录类型**：
+```jsonl
+{"_type": "usage", "model": "anthropic/claude-sonnet-4-5", "prompt_tokens": 15234, "completion_tokens": 1823, "total_tokens": 17057, "llm_calls": 3, "timestamp": "2026-02-26T13:45:00"}
+```
+
+### 13.4 Gateway API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/sessions/:id` | 返回 session 详情，包含 usage 汇总 |
+| GET | `/api/usage` | 全局 usage 汇总（所有 session） |
+
+**响应格式**：
+```json
+// GET /api/usage
+{
+  "total_prompt_tokens": 1234567,
+  "total_completion_tokens": 234567,
+  "total_tokens": 1469134,
+  "total_llm_calls": 456,
+  "by_model": {
+    "anthropic/claude-sonnet-4-5": {
+      "prompt_tokens": 800000,
+      "completion_tokens": 150000,
+      "total_tokens": 950000,
+      "llm_calls": 300
+    }
+  },
+  "by_session": [
+    {
+      "session_id": "webchat_xxx",
+      "total_tokens": 50000,
+      "llm_calls": 10
+    }
+  ]
+}
+```
+
+### 13.5 前端展示
+
+在 ChatPage 的 sidebar 底部或 header 区域显示当前 session 的 token 用量。
+全局用量可在配置模块或独立的用量页面展示。
+
+---
+
 *本文档将随开发进展持续更新。*

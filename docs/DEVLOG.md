@@ -26,6 +26,7 @@
 | Phase 15: Bug 修复 — SSE 断开后前端误判任务完成 | ✅ 已完成 | main |
 | Phase 16: Bug 修复 — 消息 timestamp 不准确 | ✅ 已完成 | main (nanobot core) |
 | Phase 17: 任务执行体验优化 (Issue #7/#8/#9) | ✅ 已完成 | main |
+| Phase 18: Token 用量统计 (Issue #10) | 🔜 进行中 | nanobot: local 分支, web-chat: main |
 
 ---
 
@@ -443,6 +444,32 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 - `frontend/src/services/api.ts` — killTask + attachTask
 - `worker.py` — POST /tasks/<key>/kill 端点
 - `gateway.py` — POST /api/sessions/:id/task-kill 转发
+
+---
+
+## Phase 18: Token 用量统计 (Issue #10)
+
+### 需求
+- nanobot provider 已返回 usage 数据，但 agent loop 未累计保存
+- 需要在 agent loop 中累计 token usage，保存到 session JSONL
+- 前端增加用量展示模块
+
+### 实施计划
+
+#### T18.1 nanobot 核心: agent loop 累计 usage 并保存到 session (local 分支)
+- `_run_agent_loop` 中每次 `provider.chat()` 后累计 usage
+- 返回值增加 `usage` 字段
+- `_process_message` 中将 usage 写入 session（新的 `_type: "usage"` JSONL 行）
+
+#### T18.2 后端 Gateway: usage API
+- `GET /api/sessions/:id` 返回 session 详情（含 usage 汇总）
+- `GET /api/usage` 全局 usage 汇总
+
+#### T18.3 前端: 用量展示模块
+- Sidebar 底部显示当前 session 的 token 用量
+- 配置模块或独立页面显示全局用量
+
+#### T18.4 构建 + 测试 + 提交
 
 ---
 
