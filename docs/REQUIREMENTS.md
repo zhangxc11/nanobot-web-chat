@@ -557,6 +557,54 @@
 
 ---
 
+---
+
+## 十四、迭代反馈 (v2.5)
+
+> 2026-02-26 exec 工具 PIPE 卡死 + Usage 指示器刷新
+
+### Issue #18：exec 工具执行含 `&` 后台操作符的命令时卡死
+
+**现象**：
+1. nanobot 通过 exec 工具执行 `cd /dir && python3 gateway.py &` 类似命令
+2. `communicate()` 永远不返回，exec 工具超时（180s）
+
+**根因**：
+Shell 中 `&` 的优先级低于 `&&`，导致 `cd /dir && python3 server.py &` 整个复合命令被当作后台作业。子 shell 继承了 PIPE file descriptors（stdin/stdout/stderr），即使主 shell 退出，`communicate()` 仍在等待 PIPE EOF——而 PIPE EOF 只有在**所有持有 fd 的进程**都退出后才会发生。后台进程不退出，`communicate()` 就永远阻塞。
+
+**修复方案（三层防护）**：
+
+1. **exec 工具层（nanobot 核心）**：新增 `_has_background_process()` 检测函数
+   - 去除引号内字符串，排除 `&&`、`>&`、`&>`、`2>&1` 等合法模式后，检测剩余的 `&`
+   - 检测到后**拒绝执行**，返回错误信息 + 安全替代方案建议
+   - LLM 可根据提示自行调整命令
+
+2. **服务层（gateway.py / worker.py）**：新增 `--daemonize` 标志
+   - 使用 UNIX double-fork 完全脱离父进程
+   - 重定向 stdin/stdout/stderr 到 `/dev/null`
+   - 不继承任何 PIPE fd，彻底避免 `communicate()` 阻塞
+
+3. **运维层（restart-gateway.sh 脚本）**：统一服务管理
+   - 支持 `all|gateway|worker|stop|status` 子命令
+   - 内部使用 `--daemonize` 启动，安全可从 exec 工具调用
+   - 自动检测端口冲突、健康检查、PID 文件管理
+
+### Issue #19：消息发送完成后 Usage 指示器不立即刷新
+
+**现象**：
+1. 发送消息，等待 nanobot 回复完成
+2. Sidebar 底部的 UsageIndicator 仍显示旧数据
+3. 需要等 60 秒定时器或切换 session 才能看到更新
+
+**根因**：UsageIndicator 只在 session 切换和每 60 秒定时器时刷新，消息发送完成后不会触发刷新。
+
+**修复**：
+- messageStore 在消息发送/恢复完成后 dispatch `usage-updated` CustomEvent
+- UsageIndicator 监听此事件立即刷新
+- 改动文件：`messageStore.ts`, `UsageIndicator.tsx`
+
+---
+
 ### 手动维护的backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。

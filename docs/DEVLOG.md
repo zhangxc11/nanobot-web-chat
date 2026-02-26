@@ -29,6 +29,7 @@
 | Phase 18: Token 用量统计 (Issue #10) | ✅ 已完成 | nanobot: local 分支, web-chat: main |
 | Phase 19: Token 用量 SQLite 独立存储 | 🔜 进行中 | web-chat: main, nanobot: local |
 | Phase 22: Backlog 1-5 修复 | ✅ 已完成 | web-chat: main, nanobot: local |
+| Phase 23: exec PIPE 卡死修复 + Usage 刷新 | ✅ 已完成 | web-chat: main, nanobot: local |
 
 ---
 
@@ -623,6 +624,54 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 - ✅ **T22.4** Issue #16: CLI 模式下 Token 用量确认
   - 验证结论: CLI 模式不经过 worker，usage stderr JSON 输出到终端后被丢弃，不记入 SQLite
   - 已知限制，记录在需求文档中
+
+---
+
+## Phase 23: exec 工具 PIPE 卡死修复 + Usage 刷新 (2026-02-26)
+
+### 需求来源
+- Issue #18: exec 工具执行含 `&` 后台操作符的命令时 `communicate()` 永远阻塞
+- Issue #19: 消息发送完成后 UsageIndicator 不立即刷新
+
+### 任务清单
+
+- ✅ **T23.1** nanobot 核心: exec 工具拒绝含 `&` 的命令
+  - 新增 `_has_background_process()` 静态方法
+  - 去除引号内字符串，排除 `&&`、`>&`、`&>`、`2>&1` 后检测 `&`
+  - 检测到后返回错误信息 + 安全替代方案建议
+  - 改动文件: `nanobot/agent/tools/shell.py`
+  - nanobot local 分支 commit: d2a5769
+
+- ✅ **T23.2** web-chat: gateway.py + worker.py 添加 `--daemonize` 标志
+  - 使用 UNIX double-fork 完全脱离父进程
+  - 重定向 stdin/stdout/stderr 到 /dev/null
+  - 不继承任何 PIPE fd
+  - 改动文件: `gateway.py`, `worker.py`
+
+- ✅ **T23.3** web-chat: 创建 `restart-gateway.sh` 统一管理脚本
+  - 支持 `all|gateway|worker|stop|status` 子命令
+  - PID 文件管理 + 健康检查
+  - 环境变量 `GATEWAY_PORT`/`WORKER_PORT` 可覆盖端口
+  - 改动文件: `restart-gateway.sh` (新建)
+  - web-chat commit: 4090bb8
+
+- ✅ **T23.4** web-chat: UsageIndicator 消息完成后立即刷新
+  - messageStore dispatch `usage-updated` CustomEvent
+  - UsageIndicator 监听事件立即刷新
+  - 改动文件: `messageStore.ts`, `UsageIndicator.tsx`
+  - web-chat commit: 102a077
+
+- ✅ **T23.5** web-chat: gateway.py usage 记录去重 + 补偿写入
+  - `_try_record_usage()` 方法统一 usage 写入逻辑
+  - 内存 dedup set + lock 防止重复记录（SSE done + task-status 可能重复触发）
+  - task-status API 也触发 opportunistic usage 写入
+  - 改动文件: `gateway.py`
+
+- ✅ **T23.6** 文档更新
+  - REQUIREMENTS.md: 新增 §十四 (Issue #18, #19)
+  - ARCHITECTURE.md: 更新 §8.4, 新增 §8.5 exec 防护, §8.6 daemonize 机制
+  - DEVLOG.md: 本记录
+  - nanobot 核心: 创建 docs/LOCAL_CHANGES.md
 
 ---
 
