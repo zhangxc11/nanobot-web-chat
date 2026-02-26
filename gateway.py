@@ -1019,48 +1019,19 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
 
     def _try_record_usage(self, usage):
         """Record usage to analytics DB with deduplication.
-        
-        Uses (session_key, finished_at, model, total_tokens) as dedup key.
-        Thread-safe via in-memory set + lock.
+
+        NOTE: Since nanobot core v2 (unified UsageRecorder), the agent loop
+        writes usage directly to SQLite.  Gateway no longer needs to record
+        usage from SSE/worker.  This method is now a no-op to avoid duplicate
+        rows.  The /api/usage read routes remain unchanged.
         """
-        if not usage or not usage.get('session_key'):
-            return
-
-        dedup_key = (
-            usage['session_key'],
-            usage.get('finished_at', ''),
-            usage.get('model', 'unknown'),
-            usage.get('total_tokens', 0),
-        )
-
-        with self._recorded_usage_lock:
-            if dedup_key in self._recorded_usage:
-                return
-            self._recorded_usage.add(dedup_key)
-            # Prevent unbounded growth — trim old entries
-            if len(self._recorded_usage) > 1000:
-                # Keep only the most recent ~500 entries (no ordering, just trim)
-                excess = len(self._recorded_usage) - 500
-                for _ in range(excess):
-                    self._recorded_usage.pop()
-
-        try:
-            analytics_db.record_usage(
-                session_key=usage['session_key'],
-                model=usage.get('model', 'unknown'),
-                prompt_tokens=usage.get('prompt_tokens', 0),
-                completion_tokens=usage.get('completion_tokens', 0),
-                total_tokens=usage.get('total_tokens', 0),
-                llm_calls=usage.get('llm_calls', 0),
-                started_at=usage.get('started_at', ''),
-                finished_at=usage.get('finished_at', ''),
+        # No-op: usage is now recorded by nanobot core (UsageRecorder in agent/loop.py).
+        if usage:
+            logger.debug(
+                f"Skipping gateway-side usage recording for {usage.get('session_key', '?')} "
+                f"(handled by nanobot core UsageRecorder)"
             )
-            logger.info(f"Recorded usage for {usage['session_key']}: {usage.get('total_tokens', 0)} tokens")
-        except Exception as e:
-            logger.error(f"Failed to record usage: {e}")
-            # Remove from dedup set so it can be retried
-            with self._recorded_usage_lock:
-                self._recorded_usage.discard(dedup_key)
+        return
 
     def _serve_static(self, path):
         """Serve static files from frontend/dist with SPA fallback."""
