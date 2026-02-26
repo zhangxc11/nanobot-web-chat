@@ -68,6 +68,7 @@ export interface TaskStatus {
   started_at?: string;
   finished_at?: string;
   progress_count?: number;
+  progress?: string[];  // full progress history
   error?: string;
   message?: string;
 }

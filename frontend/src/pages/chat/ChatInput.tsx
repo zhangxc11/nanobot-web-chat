@@ -1,13 +1,15 @@
-import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type ChangeEvent } from 'react';
+import { useRef, useCallback, useEffect, type KeyboardEvent, type ChangeEvent } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { useSessionStore } from '@/store/sessionStore';
 import styles from './ChatInput.module.css';
 
 export default function ChatInput() {
-  const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { sending, sendingSessionId, sendMessage, cancelTask } = useMessageStore();
+  const { sending, sendingSessionId, sendMessage, cancelTask, draftBySession, setDraft } = useMessageStore();
   const { activeSessionId } = useSessionStore();
+
+  // Get draft text for current session
+  const text = activeSessionId ? (draftBySession[activeSessionId] || '') : '';
 
   // Is the current session the one with the running task?
   const isCurrentSessionSending = sending && sendingSessionId === activeSessionId;
@@ -28,21 +30,30 @@ export default function ChatInput() {
     el.style.height = Math.min(el.scrollHeight, 150) + 'px';
   }, []);
 
+  // Adjust textarea height when switching sessions (draft text may differ in length)
+  useEffect(() => {
+    // Use requestAnimationFrame to ensure the textarea value is updated first
+    requestAnimationFrame(() => adjustHeight());
+  }, [activeSessionId, adjustHeight]);
+
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
+    if (activeSessionId) {
+      setDraft(activeSessionId, e.target.value);
+    }
     adjustHeight();
   };
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || !activeSessionId || sending) return;
-    setText('');
+    // Clear draft for this session
+    setDraft(activeSessionId, '');
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
     await sendMessage(activeSessionId, trimmed);
-  }, [text, activeSessionId, sending, sendMessage]);
+  }, [text, activeSessionId, sending, sendMessage, setDraft]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && e.shiftKey) {

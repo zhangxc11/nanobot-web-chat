@@ -502,17 +502,62 @@
 
 ---
 
+## 十三、迭代反馈 (v2.4)
+
+> 2026-02-26 Backlog 1-5 修复
+
+### Issue #12：切换 Session 后 streaming 内容丢失
+
+**现象**：执行任务过程中切换到其他 session，再切换回来，之前的 streaming 进度内容消失，只显示"正在执行任务"。
+
+**解决方案**：
+- Worker 的 task-status API 返回完整的 `progress` 列表（不仅是 `progress_count`）
+- 前端 `checkRunningTask` 切换回来时从 task-status 恢复完整的 progress 历史
+- Gateway 后端作为 progress 的持久存储（只要 gateway 不重启，数据就在）
+- Gateway 重启时降级为现有行为（只显示进度计数）
+
+### Issue #13：输入框内容未与 Session 绑定
+
+**现象**：
+1. 在对话框输入内容后切换 session，输入框内容不变，提交会发到新 session
+2. 切换回原 session 后，之前输入的内容丢失
+
+**解决方案**：
+- messageStore 新增 `draftBySession: Record<string, string>` 按 session 保存草稿
+- ChatInput 从 store 读写草稿，切换 session 时自动切换输入内容
+- 切换模块（Tab）后再切回对话，输入框内容也保持（因为 draft 在 store 中）
+
+### Issue #14：切换模块后输入框内容丢失
+
+**现象**：切换到记忆/配置等模块再切回对话，session 中之前输入的内容丢失。
+
+**解决方案**：同 Issue #13，draftBySession 在 Zustand store 中持久化，不受 Tab 切换影响。
+
+### Issue #15：Max tool iterations 后 Web 无显示
+
+**现象**：达到最大工具调用次数后，CLI 会输出提示信息，但 Web 中看不到。
+
+**根因**：nanobot 核心 `_run_agent_loop` 在 max_iterations 达到时设置了 `final_content` 文本，但**未将其作为 assistant 消息添加到 messages 列表**，导致 `_save_turn` 不会保存到 JSONL，Web UI 从 JSONL 重载时看不到。
+
+**修复**：在设置 `final_content` 后，调用 `context.add_assistant_message` 将其追加到 messages 列表。
+
+### Issue #16：CLI 模式下 Token 用量未记入统计
+
+**现象**：在命令行 `nanobot agent` 模式下交互，token 用量不会被记入 SQLite 统计。
+
+**根因**：Usage 数据通过 stderr JSON 输出（`__usage__: true`），只有 worker.py 会解析并通过 SSE 传给 gateway 写入 analytics.db。CLI 模式不经过 worker，stderr 输出到终端后被丢弃。
+
+**状态**：已知限制，暂不修复。后续可通过 Backlog #6（SDK 方案）统一解决。
+
+---
+
 ### 手动维护的backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
 
-1、【功能强化】在执行任务过程中，如果切换了session，再切换回来，显示的streamming内容就消失了，只在显示正在执行任务，应该有办法保留显示之前streaming的内容，请尝试修复。
-2、【功能强化】目前对话框输入内容没有跟session绑定，在对话框中输入内容之后，如果切换session，对话框内容保持不变，如果提交，会发起到新的session。预期的行为是，输入框跟session绑定，输入内容之后，如果切换session，输入框的内容被置换到后台，显示新session的输入框，如果切换回来，之前的内容还在。
-3、【功能强化】如果切换了模块，比如切换到记忆，再切换回来，session中之前输入的内容会丢失，希望能够保持。
-4、【bug】如果执行到最大工具调用次数，会直接返回输出，命令行情况下，会输出一个超过工具调用的信息，但是web中没有，请诊断问题所在，并修复。
-5、【架构改进】现在worker对nanobot的使用，是通过命令行的工具，它本身不是为被worker调用设计的，以至于需要大量使用stdout，stderr的方式来获取信息，比较麻烦，也容易出问题，可以考虑在nanobot中增加一个专门给worker调用的sdk，这样能更便捷的交互。这个修比较重大，而且涉及worker的调整，在命令行触发的条件下执行。
-6、【新需求】在工作过程中，输入用户指令的可能性，比如说用户要补充信息，或者看到当前执行的情况已经不符合预期了，可以在命令行中输入信息，这个时候输入的信息，可以在工具调用的间隙，作为user信息补充插入到对llm的调用过程。对于这个需求，尝试分析实现的可能性和风险。如果可以，尝试实现并试用，有效，就可以作为正式的功能。由于这个功能有一定的探索性，对web和nanobot都有影响，单独在一个工作过程实现，实现过程中，在两个仓库都需要单独的分支，ok了在合并回主分支。
-7、【新需求】目前的worker没有考虑并发支持，所以在前端限制了只有一个session可以发起命令。尝试给worker增加并发支持，增加好之后，前端在session的限制可以打开，每个session可以独立同时提交任务。这个涉及worker修改，也需要独立在一次交互任务中实现。
+6、【架构改进】现在worker对nanobot的使用，是通过命令行的工具，它本身不是为被worker调用设计的，以至于需要大量使用stdout，stderr的方式来获取信息，比较麻烦，也容易出问题，可以考虑在nanobot中增加一个专门给worker调用的sdk，这样能更便捷的交互。这个修比较重大，而且涉及worker的调整，在命令行触发的条件下执行。
+7、【新需求】在工作过程中，输入用户指令的可能性，比如说用户要补充信息，或者看到当前执行的情况已经不符合预期了，可以在命令行中输入信息，这个时候输入的信息，可以在工具调用的间隙，作为user信息补充插入到对llm的调用过程。对于这个需求，尝试分析实现的可能性和风险。如果可以，尝试实现并试用，有效，就可以作为正式的功能。由于这个功能有一定的探索性，对web和nanobot都有影响，单独在一个工作过程实现，实现过程中，在两个仓库都需要单独的分支，ok了在合并回主分支。
+8、【新需求】目前的worker没有考虑并发支持，所以在前端限制了只有一个session可以发起命令。尝试给worker增加并发支持，增加好之后，前端在session的限制可以打开，每个session可以独立同时提交任务。这个涉及worker修改，也需要独立在一次交互任务中实现。
 
 
 *本文档将随需求迭代持续更新。*

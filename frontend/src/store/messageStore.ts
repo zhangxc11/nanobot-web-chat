@@ -18,12 +18,15 @@ interface MessageStore {
   progressSteps: string[];           // real-time progress steps from SSE
   recovering: boolean;               // polling task status after SSE disconnect
   abortController: AbortController | null;  // for cancelling SSE fetch
+  draftBySession: Record<string, string>;   // per-session input draft text
   loadMessages: (sessionId: string) => Promise<void>;
   loadMoreMessages: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, content: string) => Promise<void>;
   cancelTask: () => Promise<void>;
   checkRunningTask: (sessionId: string) => Promise<void>;
   clearMessages: () => void;
+  setDraft: (sessionId: string, text: string) => void;
+  getDraft: (sessionId: string) => string;
 }
 
 const PAGE_SIZE = 30;
@@ -40,6 +43,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   progressSteps: [],
   recovering: false,
   abortController: null,
+  draftBySession: {},
 
   loadMessages: async (sessionId) => {
     set({ loading: true, error: null, messages: [], hasMore: false });
@@ -239,10 +243,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       if (status.status !== 'running') return;
 
       // There's a running task for this session — recover state
+      // Restore full progress history from backend
+      const restoredSteps = status.progress || [];
       set({
         sending: true,
         sendingSessionId: sessionId,
-        progressSteps: [],
+        progressSteps: restoredSteps,
         recovering: false,
         error: null,
       });
@@ -299,6 +305,16 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     set({ messages: [], hasMore: false, error: null });
     // NOTE: do NOT clear sending/sendingSessionId/progressSteps here
     // because the task might still be running for another session
+  },
+
+  setDraft: (sessionId, text) => {
+    set((s) => ({
+      draftBySession: { ...s.draftBySession, [sessionId]: text },
+    }));
+  },
+
+  getDraft: (sessionId) => {
+    return get().draftBySession[sessionId] || '';
   },
 }));
 

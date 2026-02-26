@@ -455,6 +455,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             'started_at': task.get('started_at'),
             'finished_at': task.get('finished_at'),
             'progress_count': len(task.get('progress', [])),
+            'progress': list(task.get('progress', [])),  # full progress history
         }
         if task['status'] == 'error':
             result['error'] = task.get('error', '')
