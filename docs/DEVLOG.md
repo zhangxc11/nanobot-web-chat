@@ -30,7 +30,7 @@
 | Phase 19: Token 用量 SQLite 独立存储 | 🔜 进行中 | web-chat: main, nanobot: local |
 | Phase 22: Backlog 1-5 修复 | ✅ 已完成 | web-chat: main, nanobot: local |
 | Phase 23: exec PIPE 卡死修复 + Usage 刷新 | ✅ 已完成 | web-chat: main, nanobot: local |
-| Phase 24: SDK 化 + 实时持久化 + 统一 Token | 🔜 规划中 | 待 nanobot 核心先行 |
+| Phase 24: SDK 化 + 实时持久化 + 统一 Token | ✅ 已完成 | nanobot: local, web-chat: main |
 
 ---
 
@@ -676,24 +676,46 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 
 ---
 
-## Phase 24: nanobot SDK 化 + 实时持久化 + 统一 Token 记录 (规划中)
+## Phase 24: nanobot SDK 化 + 实时持久化 + 统一 Token 记录 ✅
 
 > 此 Phase 涉及 nanobot 核心仓库的重大改造，web-chat 侧主要是 Worker 适配。
-> 详细设计见 nanobot 核心仓库 `docs/ARCHITECTURE.md`。
+> 详细设计见 nanobot 核心仓库 `docs/ARCHITECTURE.md` + `docs/LOCAL_CHANGES.md`。
 > 对应 web-chat 需求: §十五(Issue #20)、§十六(Issue #21)、§十七(Issue #22)
 
 ### 实施顺序
 
-1. **Phase 1 (nanobot)**: 实时 Session 持久化 — `session/manager.py` + `agent/loop.py`
-   - web-chat 无需改动，自动受益
-2. **Phase 2 (nanobot)**: 统一 Token 记录 — 新增 `usage/recorder.py`
-   - web-chat: gateway.py 移除 usage 写入逻辑
-3. **Phase 3 (nanobot + web-chat)**: SDK 化 — 新增 `sdk/runner.py`
-   - web-chat: worker.py 从 subprocess 改为 SDK 调用
+1. ✅ **Phase 1 (nanobot)**: 实时 Session 持久化 — `session/manager.py` + `agent/loop.py`
+   - `append_message()` 每条消息立即写入 JSONL，不再等 `_save_turn` 批量保存
+   - `_save_turn` 改为只保存 metadata 更新
+   - web-chat 无需改动，自动受益（SSE 断开后 JSONL 已有完整记录）
+   - nanobot commit: `5528969`
 
-### 当前状态
+2. ✅ **Phase 2 (nanobot)**: 统一 Token 记录 — 新增 `usage/recorder.py`
+   - `UsageRecorder` 直接写入 SQLite（`analytics.db`），替代 stderr JSON 输出
+   - 所有调用模式（CLI、Web、IM）统一记录，不再依赖 Worker 解析 stderr
+   - web-chat gateway.py: 移除 `_try_record_usage` 等 usage 写入逻辑（由 nanobot 核心负责）
+   - nanobot commit: `863b9f0`
 
-- 🔜 等待 nanobot 核心 Phase 1 开始实施
+3. ✅ **Phase 3 (nanobot + web-chat)**: SDK 化 — 新增 `sdk/runner.py`
+   - nanobot 核心:
+     - `agent/callbacks.py`: AgentCallbacks Protocol + DefaultCallbacks + AgentResult
+     - `agent/loop.py`: `_run_agent_loop` 接受 `callbacks` 参数
+     - `sdk/runner.py`: `AgentRunner.from_config()` + `run()` + `close()`
+   - web-chat worker.py: 完全重写
+     - 从 `subprocess.Popen` 改为 `AgentRunner.run()` in-process 调用
+     - asyncio event loop 在专用线程中运行
+     - AgentRunner 单例：复用 MCP 连接，无进程启动开销
+     - `WorkerCallbacks` 桥接 agent 事件到 SSE 客户端
+     - Kill 机制从 `os.kill(pid)` 改为 `future.cancel()`
+     - Health 端点返回 `mode: "sdk"`
+   - nanobot commits: `2315216`, `beb6a80`
+   - web-chat commit: `65a56ab`
+
+### 关键改进总结
+- **性能**: AgentRunner 单例复用 MCP 连接，不再每次请求启动新进程
+- **可靠性**: 消息实时持久化 + Usage 直写 SQLite，不再依赖 stderr 解析
+- **可维护性**: SDK callbacks 类型安全，Worker 代码大幅简化
+- **向后兼容**: CLI、gateway、IM 等现有调用方完全不受影响
 
 ---
 
