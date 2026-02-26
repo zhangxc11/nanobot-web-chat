@@ -906,6 +906,13 @@ REQUIREMENTS.md 手动维护的 backlog 项 1-5。
 ### Git
 - web-chat: `667419a` (feat/concurrent-tasks → main)
 
+### 端到端验证 (2026-02-26 23:39)
+- **顺序执行基线**: 9.2s (A:5.4s + B:3.8s)
+- **并发执行**: 3.3s (A:2.9s + B:3.3s) → **2.8x 加速** ✅
+- **running_tasks 计数**: SSE 流模式下正确显示 2 个并发任务 ✅
+- **Health 端点**: `mode: sdk-concurrent`, `running_tasks` 实时更新 ✅
+- **同 session 冲突处理**: 第二个任务等待第一个完成后执行 ✅
+
 ---
 
 *每次 session 更新此文件后 commit。*
