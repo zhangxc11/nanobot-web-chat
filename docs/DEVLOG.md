@@ -36,6 +36,7 @@
 | Phase 27: Worker 并发任务支持 (Issue #26) | ✅ 已完成 | web-chat: main |
 | Phase 28: 用量统计增强 + 工具调用用量展示 (Issue #27/#28) | ✅ 已完成 | web-chat: main |
 | Phase 29: Web UI 自修改安全实践 (Issue #32 / Backlog #14) | ✅ 已完成 | web-chat: main |
+| Phase 30: 配置增强+搜索+回收站 (Issue #33/#34/#35) | ✅ 已完成 | web-chat: main |
 
 ---
 
@@ -1039,6 +1040,60 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 
 ### Git
 - web-chat commit: `221c2d0`
+
+---
+
+## Phase 30: 配置页面增强 + Session 搜索 + 删除回收站 (Issue #33/#34/#35) ✅
+
+> 对应需求 §二十五 Issue #33 (配置页面对象数组)、Issue #34 (Session 搜索)、Issue #35 (删除回收站)
+
+### T30.1 配置页面支持对象数组展示 (Issue #33) ✅
+
+**问题**：飞书配置改为多租户数组后，配置页面无法正常展示和编辑。
+
+**改动**：
+- `ConfigPage.tsx`:
+  - 新增 `isObjectArray()` 函数区分简单数组和对象数组
+  - `ConfigValue` 对象数组返回 null（交由 ConfigObject 处理）
+  - `ConfigObject` 新增对象数组渲染逻辑：每个元素展开为可折叠子面板，标题取 `name` 字段
+  - `handleChange` 支持数组索引路径（`Number.isInteger(idx)` 判断）
+- `ConfigPage.module.css`: 新增 `.arrayBadge` 样式
+
+### T30.2 Session 搜索功能 (Issue #34) ✅
+
+**改动**：
+- `gateway.py`:
+  - 新增 `GET /api/sessions/search?q=keyword` 路由
+  - `_handle_search_sessions()`: 遍历所有 JSONL 文件，搜索标题和用户消息内容
+  - 标题匹配优先排序，每 session 最多 3 条匹配摘要，最多返回 20 条结果
+- `frontend/src/services/api.ts`:
+  - 新增 `SearchResult` 接口和 `searchSessions()` API
+- `frontend/src/pages/chat/Sidebar/Sidebar.tsx`:
+  - 新增搜索状态管理（searchQuery, searchResults, searching）
+  - 300ms debounce 搜索
+  - 搜索结果替代 session 列表展示，点击跳转
+- `frontend/src/pages/chat/Sidebar/Sidebar.module.css`:
+  - 新增 `.searchBox`, `.searchInput`, `.searchClear`, `.searchResults`, `.searchResultItem` 等样式
+
+### T30.3 删除 Session 改为移入回收站 (Issue #35) ✅
+
+**改动**：
+- `gateway.py`:
+  - `_handle_delete_session()`: `os.remove()` → `os.rename()` 移入 `sessions/.trash/`
+  - 自动创建 `.trash` 目录，同名文件加时间戳后缀
+
+### 改动文件
+- `gateway.py` — 搜索 API + 删除回收站
+- `frontend/src/services/api.ts` — 搜索 API
+- `frontend/src/pages/config/ConfigPage.tsx` — 对象数组支持
+- `frontend/src/pages/config/ConfigPage.module.css` — arrayBadge 样式
+- `frontend/src/pages/chat/Sidebar/Sidebar.tsx` — 搜索 UI
+- `frontend/src/pages/chat/Sidebar/Sidebar.module.css` — 搜索样式
+- `docs/REQUIREMENTS.md` — §二十五 Issue #33/#34/#35 + backlog 更新
+- `docs/DEVLOG.md` — Phase 30 记录
+
+### Git
+- web-chat commit: `53f268b`
 
 ---
 

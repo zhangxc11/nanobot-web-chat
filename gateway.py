@@ -136,6 +136,10 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_sessions(params)
             return
 
+        if path == '/api/sessions/search':
+            self._handle_search_sessions(params)
+            return
+
         if path == '/api/config':
             self._handle_get_config()
             return
@@ -469,7 +473,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'error': f'Rename failed: {str(e)}'}, 500)
 
     def _handle_delete_session(self, session_id):
-        """DELETE /api/sessions/:id — delete a session JSONL file."""
+        """DELETE /api/sessions/:id — move session JSONL to trash directory."""
         if '/' in session_id or '..' in session_id:
             self._send_json({'error': 'Invalid session id'}, 400)
             return
@@ -480,12 +484,95 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
             return
 
         try:
-            os.remove(filepath)
-            logger.info(f"Deleted session: {session_id}")
+            # Move to trash instead of deleting
+            trash_dir = os.path.join(SESSIONS_DIR, '.trash')
+            os.makedirs(trash_dir, exist_ok=True)
+            trash_path = os.path.join(trash_dir, session_id + '.jsonl')
+            # If a file with the same name already exists in trash, add timestamp suffix
+            if os.path.exists(trash_path):
+                from datetime import datetime
+                ts = datetime.now().strftime('%Y%m%d%H%M%S')
+                trash_path = os.path.join(trash_dir, f"{session_id}_{ts}.jsonl")
+            os.rename(filepath, trash_path)
+            logger.info(f"Moved session to trash: {session_id} → {os.path.basename(trash_path)}")
             self._send_json({'id': session_id, 'deleted': True})
         except Exception as e:
             logger.error(f"Failed to delete session {session_id}: {e}")
             self._send_json({'error': f'Delete failed: {str(e)}'}, 500)
+
+    def _handle_search_sessions(self, params):
+        """GET /api/sessions/search?q=keyword — search sessions by title and user messages."""
+        query = params.get('q', [''])[0].strip().lower()
+        if not query:
+            self._send_json({'results': []})
+            return
+
+        try:
+            results = []
+            for filename in os.listdir(SESSIONS_DIR):
+                if not filename.endswith('.jsonl'):
+                    continue
+                filepath = os.path.join(SESSIONS_DIR, filename)
+                session_id = filename[:-6]  # remove .jsonl
+                summary = session_id
+                custom_name = None
+                matches = []  # matched user message snippets
+
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        # Extract metadata
+                        if obj.get('_type') == 'metadata':
+                            meta = obj.get('metadata', {})
+                            custom_name = obj.get('custom_name') or meta.get('custom_name')
+                            continue
+
+                        role = obj.get('role', '')
+                        content = obj.get('content', '')
+                        if not content or not isinstance(content, str):
+                            continue
+
+                        # Get summary from first user message
+                        if role == 'user' and summary == session_id:
+                            # Strip [Runtime Context] block
+                            text = content.split('\n[Runtime Context]')[0].strip()
+                            if text:
+                                summary = text[:80]
+
+                        # Search in user messages
+                        if role == 'user' and query in content.lower():
+                            # Extract a snippet around the match
+                            text = content.split('\n[Runtime Context]')[0].strip()
+                            if text and len(matches) < 3:  # max 3 matches per session
+                                snippet = text[:100]
+                                matches.append(snippet)
+
+                display_name = custom_name or summary
+                # Check if title matches
+                title_match = query in display_name.lower()
+
+                if title_match or matches:
+                    results.append({
+                        'id': session_id,
+                        'summary': display_name,
+                        'filename': filename,
+                        'titleMatch': title_match,
+                        'matches': matches,
+                    })
+
+            # Sort: title matches first, then by number of content matches
+            results.sort(key=lambda r: (not r['titleMatch'], -len(r['matches'])))
+            self._send_json({'results': results[:20]})  # max 20 results
+        except Exception as e:
+            logger.error(f"Failed to search sessions: {e}")
+            self._send_json({'error': str(e)}, 500)
 
     def _get_session_key(self, session_id):
         """Read the session key from the JSONL metadata line."""

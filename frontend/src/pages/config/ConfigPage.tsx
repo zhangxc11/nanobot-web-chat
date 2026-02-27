@@ -22,6 +22,13 @@ function isSensitive(key: string): boolean {
   return SENSITIVE_KEYS.has(key);
 }
 
+// Check if an array contains objects (e.g. multi-tenant feishu config)
+function isObjectArray(value: unknown[]): value is Record<string, unknown>[] {
+  return value.length > 0 && value.every(
+    item => item !== null && typeof item === 'object' && !Array.isArray(item)
+  );
+}
+
 function ConfigValue({ 
   keyPath, 
   value, 
@@ -105,6 +112,11 @@ function ConfigValue({
   }
 
   if (Array.isArray(value)) {
+    // Object arrays (e.g. multi-tenant configs) are handled by ConfigObject
+    if (isObjectArray(value)) {
+      return null;
+    }
+    // Simple arrays (e.g. allowFrom: [])
     return (
       <input
         className={styles.input}
@@ -145,7 +157,54 @@ function ConfigObject({
       {entries.map(([key, value]) => {
         const fullPath = keyPath ? `${keyPath}.${key}` : key;
         const isObject = value !== null && typeof value === 'object' && !Array.isArray(value);
+        const isObjArray = Array.isArray(value) && isObjectArray(value);
         const isCollapsed = collapsed[key] ?? (depth >= 2);
+
+        // Object array: render each element as a sub-panel
+        if (isObjArray) {
+          return (
+            <div key={key} className={styles.nestedSection}>
+              <div
+                className={styles.nestedHeader}
+                onClick={() => setCollapsed(prev => ({ ...prev, [key]: !isCollapsed }))}
+              >
+                <span className={styles.collapseIcon}>{isCollapsed ? '▸' : '▾'}</span>
+                <span className={styles.nestedKey}>{key}</span>
+                <span className={styles.arrayBadge}>{(value as unknown[]).length} 项</span>
+              </div>
+              {!isCollapsed && (
+                <div className={styles.nestedBody}>
+                  {(value as Record<string, unknown>[]).map((item, idx) => {
+                    const itemPath = `${fullPath}.${idx}`;
+                    const itemLabel = (item.name as string) || `#${idx}`;
+                    const itemCollapsed = collapsed[`${key}.${idx}`] ?? false;
+                    return (
+                      <div key={idx} className={styles.nestedSection}>
+                        <div
+                          className={styles.nestedHeader}
+                          onClick={() => setCollapsed(prev => ({ ...prev, [`${key}.${idx}`]: !itemCollapsed }))}
+                        >
+                          <span className={styles.collapseIcon}>{itemCollapsed ? '▸' : '▾'}</span>
+                          <span className={styles.nestedKey}>{itemLabel}</span>
+                        </div>
+                        {!itemCollapsed && (
+                          <div className={styles.nestedBody}>
+                            <ConfigObject
+                              data={item}
+                              keyPath={itemPath}
+                              onChange={onChange}
+                              depth={depth + 2}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        }
 
         if (isObject) {
           return (
@@ -217,11 +276,20 @@ export default function ConfigPage() {
       if (!prev) return prev;
       const newConfig = JSON.parse(JSON.stringify(prev)); // deep clone
       const keys = keyPath.split('.');
-      let obj = newConfig;
+      let obj: any = newConfig;
       for (let i = 0; i < keys.length - 1; i++) {
-        obj = obj[keys[i]];
+        const key = keys[i];
+        // Support numeric array indices
+        const idx = Number(key);
+        obj = Number.isInteger(idx) ? obj[idx] : obj[key];
       }
-      obj[keys[keys.length - 1]] = value;
+      const lastKey = keys[keys.length - 1];
+      const lastIdx = Number(lastKey);
+      if (Number.isInteger(lastIdx)) {
+        obj[lastIdx] = value;
+      } else {
+        obj[lastKey] = value;
+      }
       return newConfig;
     });
     setDirty(true);

@@ -268,6 +268,15 @@
   color: var(--text-primary);
 }
 
+.arrayBadge {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 4px;
+}
+
 .nestedBody {
   padding-left: 20px;
   border-left: 1px solid var(--border);

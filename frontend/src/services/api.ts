@@ -36,6 +36,23 @@ export async function deleteSession(sessionId: string): Promise<{ id: string; de
   return res.json();
 }
 
+// ── Session Search ──
+
+export interface SearchResult {
+  id: string;
+  summary: string;
+  filename: string;
+  titleMatch: boolean;
+  matches: string[];
+}
+
+export async function searchSessions(query: string): Promise<SearchResult[]> {
+  const res = await fetch(`${API_BASE}/sessions/search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error(`Failed to search sessions: ${res.status}`);
+  const data = await res.json();
+  return data.results;
+}
+
 // ── Messages ──
 
 export async function fetchMessages(

@@ -1159,10 +1159,52 @@ Step 4 (Web UI 安全执行):
 
 ---
 
+## 二十五、迭代反馈 (v3.3.1)
+
+> 2026-02-27 配置页面增强 + Session 管理增强
+
+### Issue #33：配置页面不支持对象数组展示（多租户飞书配置）
+
+**现象**：
+1. 飞书配置从单对象改为多租户数组格式后（`feishu: [{name: "ST", ...}, {name: "lab", ...}]`）
+2. 配置页面将整个数组 `JSON.stringify` 塞入一个 input 框，无法正常查看和编辑
+
+**解决方案**：
+- 新增 `isObjectArray()` 判断函数，区分简单数组（如 `allowFrom: []`）和对象数组（如多租户配置）
+- `ConfigObject` 组件支持对象数组：每个数组元素展开为独立的可折叠子面板，标题取 `name` 字段
+- `handleChange` 支持数组索引路径（如 `channels.feishu.0.appSecret`）
+- 新增 `arrayBadge` 样式，数组标题旁显示 "N 项" 小标签
+
+### Issue #34：Session 搜索功能
+
+**现象**：Session 数量增多后，在列表中查找特定对话困难，需要逐个翻阅。
+
+**解决方案**：
+- 后端新增 `GET /api/sessions/search?q=keyword` — 搜索 session 标题和用户消息内容
+  - 匹配标题（custom_name 或首条用户消息摘要）和用户消息内容
+  - 返回匹配的 session 列表，每个包含最多 3 条匹配摘要
+  - 标题匹配优先排序，最多返回 20 条结果
+- 前端 Sidebar 新增搜索栏（在"新建对话"按钮下方）
+  - 输入关键词后 300ms debounce 搜索
+  - 搜索结果替代 session 列表显示
+  - 点击搜索结果跳转到对应 session
+  - 清除搜索恢复正常列表
+
+### Issue #35：删除 Session 改为移入回收站
+
+**现象**：删除 session 时直接删除 JSONL 文件，无法恢复误删的对话。
+
+**解决方案**：
+- 后端 `DELETE /api/sessions/:id` 改为将文件移入 `sessions/.trash/` 目录
+- 同名文件已存在时自动添加时间戳后缀（如 `session_20260227145100.jsonl`）
+- 日志记录移动操作，便于追溯
+
+---
+
 ### 手动维护的backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
 
-
+1、web-chat的gateway，跟nanobot本身的gateway，这两个经常容易弄混，把web-chat的gateway的名字改成别的，避免混淆。
 
 *本文档将随需求迭代持续更新。*

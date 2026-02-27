@@ -10,6 +10,122 @@
   flex-shrink: 0;
 }
 
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  transition: border-color 0.2s;
+}
+
+.searchBox:focus-within {
+  border-color: var(--accent);
+}
+
+.searchIcon {
+  font-size: 12px;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.searchInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.searchInput::placeholder {
+  color: var(--text-muted);
+}
+
+.searchClear {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.searchClear:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ── Search Results ── */
+
+.searchResults {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.searchStatus {
+  text-align: center;
+  padding: 20px 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.searchResultItem {
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.searchResultItem:hover {
+  background: var(--bg-hover);
+}
+
+.searchResultTitle {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchResultMatches {
+  margin-top: 4px;
+}
+
+.searchResultMatch {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 0;
+}
+
+.searchResultFilename {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  margin-top: 2px;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+}
+
 .newButton {
   display: flex;
   align-items: center;
