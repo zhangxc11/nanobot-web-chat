@@ -37,6 +37,8 @@
 | Phase 28: 用量统计增强 + 工具调用用量展示 (Issue #27/#28) | ✅ 已完成 | web-chat: main |
 | Phase 29: Web UI 自修改安全实践 (Issue #32 / Backlog #14) | ✅ 已完成 | web-chat: main |
 | Phase 30: 配置增强+搜索+回收站 (Issue #33/#34/#35) | ✅ 已完成 | web-chat: main |
+| Phase 31: 改名 + URL 编码修复 (Issue #36/#37) | ✅ 已完成 | web-chat: main |
+| Phase 32: 图片输入功能 (Issue #38) | ✅ 已完成 | web-chat: main, nanobot: local |
 
 ---
 
@@ -1097,7 +1099,7 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 
 ---
 
-## Phase 32: 图片输入功能 (Issue #38) 🔜 进行中
+## Phase 32: 图片输入功能 (Issue #38) ✅
 
 > 对应需求 §二十七 Issue #38
 > 支持用户在 Web Chat 中发送图片，利用 Claude 多模态能力理解图片内容
@@ -1107,29 +1109,63 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 由于涉及 worker.py 和 nanobot 核心修改（🔴高风险），在 CLI 中执行全部改动。
 
 #### Step 1: nanobot 核心 — media 参数透传
-- 🔜 **T32.1** `process_direct()` 增加 `media` 参数，透传给 `_build_user_content()`
-- **T32.2** `AgentRunner.run()` 增加 `media` 参数，透传给 `process_direct()`
-- **T32.3** 测试：CLI 模式下发送图片消息验证
+- ✅ **T32.1** `process_direct()` 增加 `media` 参数，透传给 `_build_user_content()`
+- ✅ **T32.2** `AgentRunner.run()` 增加 `media` 参数，透传给 `process_direct()`
+- ✅ **T32.3** 测试：CLI 模式下发送图片消息验证
 
 #### Step 2: Worker — 接收并传递 media
-- **T32.4** `worker.py` execute-stream 端点接收 `images` 字段
-- **T32.5** 传递给 `runner.run(media=images)`
+- ✅ **T32.4** `worker.py` execute-stream 端点接收 `images` 字段
+- ✅ **T32.5** 传递给 `runner.run(media=images)`
 
 #### Step 3: Webserver — 图片上传 + 静态服务
-- **T32.6** `webserver.py` 新增 `POST /api/upload` — 图片上传 API
-- **T32.7** `webserver.py` 新增 `GET /api/uploads/<date>/<filename>` — 图片静态服务
-- **T32.8** `webserver.py` 转发 images 给 worker
+- ✅ **T32.6** `webserver.py` 新增 `POST /api/upload` — multipart 图片上传 API
+- ✅ **T32.7** `webserver.py` 新增 `GET /api/uploads/<date>/<filename>` — 图片静态服务
+- ✅ **T32.8** `webserver.py` 转发 images 给 worker + 处理多模态 content
 
 #### Step 4: 前端 — 图片交互
-- **T32.9** ChatInput 增加图片选择/拖拽/粘贴功能
-- **T32.10** 图片预览缩略图 + 移除按钮
-- **T32.11** 发送时上传图片 + 附带路径
-- **T32.12** MessageItem 中显示用户消息里的图片
+- ✅ **T32.9** ChatInput 增加图片选择(📎)/拖拽/粘贴功能
+- ✅ **T32.10** 图片预览缩略图 + 上传进度 + 移除按钮
+- ✅ **T32.11** 发送时上传图片 + 附带路径
+- ✅ **T32.12** MessageItem 中显示用户消息里的图片 (multimodal content 解析)
 
 #### Step 5: 重启 + 验证
-- **T32.13** `restart.sh all` 重启服务
-- **T32.14** 端到端测试：上传图片 → 发送 → Claude 理解 → 回复
-- **T32.15** Git commit
+- ✅ **T32.13** `restart.sh all` 重启服务
+- ✅ **T32.14** 端到端测试：上传蓝色 PNG → 发送 "什么颜色" → Claude 回复 "蓝色" ✅
+- ✅ **T32.15** Git commit: `9fc2544`
+
+### 技术细节
+
+#### 多模态消息格式
+用户发送带图片的消息时，JSONL 中 user message 的 `content` 为数组：
+```json
+[
+  {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+  {"type": "text", "text": "用户的文本消息"},
+  {"type": "text", "text": "[Runtime Context]\n..."}
+]
+```
+
+#### 前端兼容处理
+- `Message.content` 类型从 `string` 扩展为 `string | ContentBlock[]`
+- `getTextContent()` / `getImageUrls()` 辅助函数统一处理两种格式
+- AssistantTurnGroup、ToolProcessCollapsible 等组件全部适配
+
+#### 图片存储
+- 上传目录: `~/.nanobot/workspace/uploads/<date>/<uuid>.<ext>`
+- URL: `/api/uploads/<date>/<filename>`
+- JSONL 中存储 base64 data URL（由 nanobot 核心 `_build_user_content` 编码）
+
+### 改动文件
+- nanobot 核心: `agent/loop.py`, `sdk/runner.py` — media 参数透传
+- `worker.py` — images 参数接收 + 传递
+- `webserver.py` — upload API + image serving + multimodal content 处理
+- `frontend/src/types/index.ts` — ContentBlock 类型
+- `frontend/src/services/api.ts` — uploadImage + sendMessageStream images
+- `frontend/src/store/messageStore.ts` — sendMessage images 参数
+- `frontend/src/pages/chat/ChatInput.tsx` — 图片交互全套
+- `frontend/src/pages/chat/ChatInput.module.css` — 图片预览/拖拽样式
+- `frontend/src/pages/chat/MessageItem.tsx` — multimodal content 渲染
+- `frontend/src/pages/chat/MessageList.module.css` — 消息图片样式
 
 ---
 
