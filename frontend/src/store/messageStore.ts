@@ -1,11 +1,11 @@
-// Message state store — v20 (per-session concurrent tasks)
+// Message state store — v21 (slash commands support)
 import { create } from 'zustand';
 import type { Message, SessionTask } from '../types';
 import * as api from '../services/api';
 import { useSessionStore } from './sessionStore';
 
 // Build version marker for cache busting
-const _BUILD_VERSION = '20.0';
+const _BUILD_VERSION = '21.0';
 console.debug('[messageStore] version:', _BUILD_VERSION);
 
 const EMPTY_TASK: SessionTask = {
@@ -14,6 +14,23 @@ const EMPTY_TASK: SessionTask = {
   recovering: false,
   abortController: null,
 };
+
+// ── Slash command definitions ──
+
+const HELP_TEXT = `🐈 nanobot commands:
+/new  — 开始新对话（归档当前历史）
+/stop — 停止正在执行的任务
+/help — 显示此帮助信息`;
+
+/** Create a local system message (not persisted to JSONL) */
+function _makeSystemMsg(content: string): Message {
+  return {
+    id: `sys_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    role: 'system-local',
+    content,
+    timestamp: new Date().toISOString(),
+  };
+}
 
 interface MessageStore {
   messages: Message[];
@@ -97,8 +114,111 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   },
 
   sendMessage: async (sessionId, content, images) => {
-    // Prevent sending if THIS session already has a running task
     const task = get().getTask(sessionId);
+
+    // ── Slash command interception (checked BEFORE task.sending guard) ──
+    const trimmed = content.trim();
+    const cmd = trimmed.toLowerCase().split(/\s/)[0];
+
+    if (cmd.startsWith('/')) {
+      switch (cmd) {
+        case '/help': {
+          // Local command: show help as system message
+          set((s) => ({
+            messages: [...s.messages, _makeSystemMsg(HELP_TEXT)],
+            error: null,
+          }));
+          return;
+        }
+
+        case '/stop': {
+          // Local command: stop running task
+          if (task.sending) {
+            await get().cancelTask(sessionId);
+          } else {
+            set((s) => ({
+              messages: [...s.messages, _makeSystemMsg('没有正在执行的任务。')],
+            }));
+          }
+          return;
+        }
+
+        case '/new': {
+          // Prevent /new while task is running
+          if (task.sending) {
+            set((s) => ({
+              messages: [...s.messages, _makeSystemMsg('任务执行中，请先 /stop 停止任务再执行 /new。')],
+            }));
+            return;
+          }
+
+          // Backend command: send to agent loop for session archival
+          // Show the command as user message
+          const cmdMsg: Message = {
+            id: `temp_${Date.now()}`,
+            role: 'user',
+            content: '/new',
+            timestamp: new Date().toISOString(),
+          };
+          set((s) => ({
+            messages: [...s.messages, cmdMsg],
+            error: null,
+            ..._updateTask(s, sessionId, {
+              sending: true,
+              progressSteps: [],
+              recovering: false,
+              abortController: null,
+            }),
+          }));
+
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const controller = api.sendMessageStream(sessionId, '/new', {
+                onProgress: (step) => {
+                  set((s) => {
+                    const cur = s.taskBySession[sessionId] || { ...EMPTY_TASK };
+                    return _updateTask(s, sessionId, {
+                      progressSteps: [...cur.progressSteps, step],
+                    });
+                  });
+                },
+                onDone: () => resolve(),
+                onError: (msg) => reject(new Error(msg)),
+              });
+              set((s) => _updateTask(s, sessionId, { abortController: controller }));
+            });
+
+            // /new completed — reload messages (should be empty) + refresh session list
+            await _reloadMessages(sessionId, set);
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            set((s) => ({
+              ..._updateTask(s, sessionId, {
+                sending: false,
+                progressSteps: [],
+                abortController: null,
+              }),
+              error: `⚠️ ${errorMsg}`,
+            }));
+          }
+          return;
+        }
+
+        default: {
+          // Unknown slash command
+          set((s) => ({
+            messages: [...s.messages, _makeSystemMsg(
+              `未知命令: ${cmd}\n\n输入 /help 查看可用命令。`
+            )],
+          }));
+          return;
+        }
+      }
+    }
+
+    // ── Normal message sending (non-slash) ──
+
+    // Prevent sending if THIS session already has a running task
     if (task.sending) return;
 
     // Optimistic update: add user message

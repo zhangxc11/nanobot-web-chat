@@ -1404,6 +1404,109 @@ async def run(
 
 ---
 
+---
+
+## 二十九、斜杠命令系统 (v4.1)
+
+> 2026-02-27 Web UI 支持斜杠命令，与 CLI/飞书/Telegram 行为一致
+
+### Issue #40：Web UI 不支持斜杠命令
+
+**现象**：
+1. 在 CLI 和 Telegram 中输入 `/help` 可查看支持的命令，输入 `/new` 可开始新对话
+2. 在 Web UI 中输入 `/help` 或 `/new` 会作为普通消息发送给 agent，浪费 token
+3. Web UI 缺少 `/stop` 命令来中断正在执行的任务
+
+**现有命令系统梳理**：
+
+| 命令 | CLI | Telegram | 飞书 | Web UI | 处理层级 |
+|------|-----|----------|------|--------|----------|
+| `/help` | ❌ 不支持 | ✅ Telegram handler 直接回复 | ❌ | ❌ | Channel / Agent Loop |
+| `/new` | ❌（用 exit 退出） | ✅ 转发到 agent loop | ❌ | ❌ | Agent Loop |
+| `/stop` | Ctrl+C | ❌ | ❌ | ✅ 有停止按钮 | 前端 UI |
+| `exit/quit/bye` | ✅ CLI 层处理 | ❌ | ❌ | ❌ | CLI 层 |
+
+**nanobot 核心 agent loop 已支持的命令**（`loop.py` `_process_message`）：
+- `/new` — 归档当前 session 历史，清空 session，返回 "New session started."
+- `/help` — 返回命令列表
+
+**设计方案 — 前端命令拦截 + 后端透传**：
+
+Web UI 的斜杠命令分为两类：
+
+#### 1. 前端本地命令（不发送到后端）
+
+| 命令 | 行为 | 说明 |
+|------|------|------|
+| `/stop` | 中断当前任务 | 等价于点击停止按钮，调用 `cancelTask()` |
+| `/help` | 显示命令帮助 | 在消息区域显示命令列表（不消耗 token） |
+
+#### 2. 后端命令（发送到 agent loop 处理）
+
+| 命令 | 行为 | 说明 |
+|------|------|------|
+| `/new` | 开始新对话 | 发送到后端，agent loop 归档历史并清空 session |
+
+**前端实现方案**：
+
+在 `messageStore.sendMessage()` 中拦截斜杠命令：
+
+```typescript
+// 命令检测
+const trimmed = content.trim().toLowerCase();
+if (trimmed.startsWith('/')) {
+  const cmd = trimmed.split(/\s/)[0]; // 取第一个词
+  switch (cmd) {
+    case '/help':
+      // 本地处理：插入系统消息显示帮助
+      break;
+    case '/stop':
+      // 本地处理：调用 cancelTask()
+      break;
+    case '/new':
+      // 发送到后端，agent loop 处理
+      break;
+    default:
+      // 未知命令，显示提示
+      break;
+  }
+}
+```
+
+**`/help` 显示内容**：
+
+```
+🐈 nanobot commands:
+/new  — 开始新对话（归档当前历史）
+/stop — 停止正在执行的任务
+/help — 显示此帮助信息
+```
+
+**`/new` 流程**：
+1. 前端发送 `/new` 作为消息到后端
+2. Agent loop 执行 session 归档 + 清空
+3. 返回 "New session started."
+4. 前端收到响应后重新加载消息列表（应该为空）
+5. 刷新 session 列表
+
+**`/stop` 流程**：
+1. 前端检测到 `/stop`
+2. 如果当前 session 有正在执行的任务 → 调用 `cancelTask()`
+3. 如果没有任务 → 显示提示 "没有正在执行的任务"
+
+**消息显示**：
+- 斜杠命令不作为 user 消息显示在消息列表中（不乐观更新）
+- `/help` 的响应显示为系统消息（特殊样式）
+- `/new` 的响应由后端返回，正常显示
+- `/stop` 的响应作为系统提示显示
+
+**系统消息样式**：
+- 居中显示，灰色背景，圆角
+- 与 user/assistant 消息视觉区分
+- 不参与工具调用折叠逻辑
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。

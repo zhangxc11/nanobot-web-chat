@@ -17,7 +17,7 @@ export interface ToolCall {
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant' | 'tool';
+  role: 'user' | 'assistant' | 'tool' | 'system-local';
   content: string | ContentBlock[];
   timestamp: string;
   toolCalls?: ToolCall[];
@@ -42,6 +42,14 @@ export interface ProgressStep {
   name?: string;
   /** Full tool output content (only for tool_result type, for expand/collapse) */
   content?: string;
+}
+
+/** A local system message (e.g. /help output, /stop confirmation) — not persisted */
+export interface SystemMessage {
+  id: string;
+  role: 'system-local';
+  content: string;
+  timestamp: string;
 }
 
 export type TabKey = 'chat' | 'usage' | 'config' | 'memory' | 'skills';

@@ -39,6 +39,7 @@
 | Phase 30: 配置增强+搜索+回收站 (Issue #33/#34/#35) | ✅ 已完成 | web-chat: main |
 | Phase 31: 改名 + URL 编码修复 (Issue #36/#37) | ✅ 已完成 | web-chat: main |
 | Phase 32: 图片输入功能 (Issue #38) | ✅ 已完成 | web-chat: main, nanobot: local |
+| Phase 33: 斜杠命令系统 (Issue #40) | ✅ 已完成 | web-chat: main |
 
 ---
 
@@ -1166,6 +1167,61 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 - `frontend/src/pages/chat/ChatInput.module.css` — 图片预览/拖拽样式
 - `frontend/src/pages/chat/MessageItem.tsx` — multimodal content 渲染
 - `frontend/src/pages/chat/MessageList.module.css` — 消息图片样式
+
+---
+
+---
+
+## Phase 33: 斜杠命令系统 (Issue #40) ✅
+
+> 日期：2026-02-27
+> 需求：REQUIREMENTS.md §二十九 Issue #40
+> Web UI 支持斜杠命令（/help, /new, /stop），与 CLI/Telegram 行为一致
+
+### 需求概述
+
+1. `/help` — 前端本地处理，显示命令帮助（不消耗 token）
+2. `/stop` — 前端本地处理，等价于停止按钮
+3. `/new` — 发送到后端 agent loop 处理，归档并清空 session
+
+### 实现记录
+
+#### T33.1 前端 messageStore: 斜杠命令拦截逻辑 ✅
+- `sendMessage()` 在 `task.sending` 检查之前拦截斜杠命令
+- `/help`: 插入 `system-local` 消息显示命令列表
+- `/stop`: 有任务时调用 `cancelTask()`，无任务时显示提示
+- `/new`: 检查任务状态，发送到后端 agent loop 处理
+- 未知命令: 显示提示信息
+- ChatInput `handleSend()` 也拦截 `/stop`（处理 inject 模式）
+
+#### T33.2 前端 types: 新增系统消息类型 ✅
+- `Message.role` 扩展支持 `'system-local'`
+- 新增 `SystemMessage` 接口
+- `MessageGroup.type` 扩展支持 `'system'`
+
+#### T33.3 前端 MessageItem: 系统消息渲染样式 ✅
+- `groupMessages()` 识别 `system-local` role，创建 `system` 类型分组
+- `MessageItem` 新增 `system-local` 渲染分支（居中、灰色背景、圆角）
+- CSS: `.systemMessage` + `.systemBubble` 样式
+
+#### T33.4 前端 ChatInput: placeholder 更新 ✅
+- 正常模式: "输入消息或 /help 查看命令 (Shift+Enter 发送)"
+- 执行中: "输入补充信息或 /stop 停止 (Shift+Enter 注入)"
+
+#### T33.5 构建 + 测试 + Git 提交 ✅
+- TypeScript 编译通过
+- Vite 构建通过
+
+### 改动文件
+- `frontend/src/types/index.ts` — Message.role 扩展 + SystemMessage 类型
+- `frontend/src/store/messageStore.ts` — v21 斜杠命令拦截 + _makeSystemMsg
+- `frontend/src/pages/chat/ChatInput.tsx` — /stop 拦截 + placeholder 更新
+- `frontend/src/pages/chat/MessageItem.tsx` — system-local 渲染 + MessageGroup 扩展
+- `frontend/src/pages/chat/MessageList.tsx` — system 分组渲染
+- `frontend/src/pages/chat/MessageList.module.css` — .systemMessage + .systemBubble
+- `docs/REQUIREMENTS.md` — §二十九 Issue #40
+- `docs/ARCHITECTURE.md` — §十五 斜杠命令系统
+- `docs/DEVLOG.md` — Phase 33 记录
 
 ---
 

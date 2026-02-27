@@ -542,3 +542,24 @@
   display: block;
   background: var(--bg-primary);
 }
+
+/* ── System Messages (slash command responses) ── */
+
+.systemMessage {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0;
+}
+
+.systemBubble {
+  padding: 8px 16px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  text-align: center;
+  max-width: 80%;
+  border: 1px solid var(--border);
+}

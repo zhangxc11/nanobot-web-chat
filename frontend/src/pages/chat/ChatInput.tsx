@@ -154,6 +154,33 @@ export default function ChatInput() {
     const hasImages = pendingImages.some(img => img.serverPath && !img.error);
     if ((!trimmed && !hasImages) || !activeSessionId) return;
 
+    // ── Slash command interception (works in both normal and inject mode) ──
+    const cmd = trimmed.toLowerCase().split(/\s/)[0];
+    if (cmd.startsWith('/')) {
+      // Clear draft
+      setDraft(activeSessionId, '');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+
+      if (cmd === '/stop') {
+        // /stop always triggers cancel, regardless of mode
+        if (isCurrentSessionSending) {
+          await cancelTask(activeSessionId);
+        } else {
+          // Delegate to sendMessage which will show "no running task" system message
+          await sendMessage(activeSessionId, trimmed);
+        }
+        return;
+      }
+
+      // Other slash commands: delegate to sendMessage (which handles /help, /new, etc.)
+      await sendMessage(activeSessionId, trimmed);
+      return;
+    }
+
+    // ── Normal flow (non-slash) ──
+
     // Collect uploaded image paths
     const imagePaths = pendingImages
       .filter(img => img.serverPath && !img.error)
@@ -176,7 +203,7 @@ export default function ChatInput() {
       // Normal send mode
       await sendMessage(activeSessionId, trimmed || '请看这张图片', imagePaths.length > 0 ? imagePaths : undefined);
     }
-  }, [text, pendingImages, activeSessionId, isCurrentSessionSending, sendMessage, injectMessage, setDraft]);
+  }, [text, pendingImages, activeSessionId, isCurrentSessionSending, sendMessage, injectMessage, cancelTask, setDraft]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && e.shiftKey) {
@@ -195,11 +222,11 @@ export default function ChatInput() {
   const anyUploading = pendingImages.some(img => img.uploading);
 
   // Determine placeholder text
-  let placeholder = '输入消息... (Shift+Enter 发送, Enter 换行)';
+  let placeholder = '输入消息或 /help 查看命令 (Shift+Enter 发送)';
   if (disabled) {
     placeholder = '请先选择或创建对话';
   } else if (isCurrentSessionSending) {
-    placeholder = '输入补充信息... (Shift+Enter 注入)';
+    placeholder = '输入补充信息或 /stop 停止 (Shift+Enter 注入)';
   }
 
   return (

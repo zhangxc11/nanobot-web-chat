@@ -180,6 +180,17 @@ function ToolProcessCollapsible({ items, toolCount, usageRecords }: { items: Pro
 export default function MessageItem({ message }: MessageItemProps) {
   const { role, content, timestamp } = message;
 
+  // System-local messages (slash command responses)
+  if (role === 'system-local') {
+    return (
+      <div className={styles.systemMessage}>
+        <div className={styles.systemBubble}>
+          {getTextContent(content)}
+        </div>
+      </div>
+    );
+  }
+
   // Standalone tool messages (shouldn't happen with grouping, but just in case)
   if (role === 'tool') {
     return (
@@ -226,7 +237,7 @@ export default function MessageItem({ message }: MessageItemProps) {
 // ── Grouping logic ──
 
 export interface MessageGroup {
-  type: 'user' | 'assistant-turn';
+  type: 'user' | 'assistant-turn' | 'system';
   messages: Message[];
 }
 
@@ -237,8 +248,8 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
   while (i < messages.length) {
     const msg = messages[i];
 
-    if (msg.role === 'user') {
-      groups.push({ type: 'user', messages: [msg] });
+    if (msg.role === 'user' || msg.role === 'system-local') {
+      groups.push({ type: msg.role === 'system-local' ? 'system' : 'user', messages: [msg] });
       i++;
       continue;
     }

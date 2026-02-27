@@ -288,6 +288,9 @@ export default function MessageList() {
           if (group.type === 'user') {
             return <MessageItem key={group.messages[0].id} message={group.messages[0]} />;
           }
+          if (group.type === 'system') {
+            return <MessageItem key={group.messages[0].id} message={group.messages[0]} />;
+          }
           // assistant-turn: render compactly
           return <AssistantTurnGroup key={`turn-${idx}`} messages={group.messages} usageRecords={sessionUsage?.records} />;
         })}

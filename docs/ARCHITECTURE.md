@@ -1411,4 +1411,39 @@ Phase 3 (nanobot 核心 + web-chat worker):
 
 ---
 
+## 十五、斜杠命令系统 (v4.1)
+
+### 15.1 命令架构
+
+Web UI 的斜杠命令分为两层处理：
+
+```
+用户输入 /xxx
+  │
+  ├─ 前端本地命令（不消耗 token）
+  │   ├─ /help  → 显示命令列表（system-local 消息）
+  │   ├─ /stop  → 中断运行中的任务（调用 cancelTask）
+  │   └─ /xxx   → 未知命令提示
+  │
+  └─ 后端命令（发送到 agent loop）
+      └─ /new   → 归档 session 历史，清空对话
+```
+
+### 15.2 前端实现
+
+**命令拦截位置**：`messageStore.sendMessage()` 中，在 `task.sending` 检查之前。
+
+**关键设计**：
+- 斜杠命令在 `task.sending` 检查之前拦截，确保 `/help` 和 `/stop` 在任务执行中也能使用
+- `/stop` 在 ChatInput 层也有拦截（处理 inject 模式下的 `/stop`）
+- `/new` 在任务执行中会提示先停止任务
+- 系统消息使用 `system-local` role，不持久化到 JSONL
+
+**系统消息类型**：`Message.role = 'system-local'`
+- 居中显示，灰色背景圆角
+- 不参与 assistant turn 分组
+- 不参与工具调用折叠
+
+---
+
 *本文档将随开发进展持续更新。*
