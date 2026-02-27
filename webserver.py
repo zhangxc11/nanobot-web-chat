@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-nanobot Web Chat Gateway — API server + static file serving.
+nanobot Web Chat Server — API server + static file serving.
 
 Handles all frontend requests. Chat messages are forwarded to the Worker
 service (default: localhost:8082) for nanobot agent execution.
 
-Usage: python3 gateway.py [--port 8081] [--worker-url http://127.0.0.1:8082]
+Usage: python3 webserver.py [--port 8081] [--worker-url http://127.0.0.1:8082]
 """
 
 import http.server
@@ -40,7 +40,7 @@ CONFIG_FILE = os.path.expanduser('~/.nanobot/config.json')
 USER_SKILLS_DIR = os.path.expanduser('~/.nanobot/workspace/skills')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(SCRIPT_DIR, 'frontend', 'dist')
-LOG_FILE = '/tmp/nanobot-gateway.log'
+LOG_FILE = '/tmp/nanobot-webserver.log'
 
 # Analytics DB (SQLite)
 from analytics import AnalyticsDB
@@ -59,7 +59,7 @@ except Exception:
     pass
 
 # ── Logging setup ──
-logger = logging.getLogger('gateway')
+logger = logging.getLogger('webserver')
 logger.setLevel(logging.DEBUG)
 _fmt = logging.Formatter('[%(asctime)s] %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 _fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
@@ -72,8 +72,8 @@ logger.addHandler(_fh)
 logger.addHandler(_sh)
 
 
-class GatewayHandler(http.server.BaseHTTPRequestHandler):
-    """REST API handler for nanobot Web Chat — Gateway."""
+class WebServerHandler(http.server.BaseHTTPRequestHandler):
+    """REST API handler for nanobot Web Chat Server."""
 
     def log_message(self, format, *args):
         # Redirect http.server default logging to our logger
@@ -101,7 +101,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
 
     def _parse_path(self):
         parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip('/')
+        path = urllib.parse.unquote(parsed.path).rstrip('/')
         params = urllib.parse.parse_qs(parsed.query)
         return path, params
 
@@ -129,7 +129,7 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         path, params = self._parse_path()
 
         if path == '/api/health':
-            self._send_json({'status': 'ok', 'version': 'v2', 'service': 'gateway'})
+            self._send_json({'status': 'ok', 'version': 'v2', 'service': 'webserver'})
             return
 
         if path == '/api/sessions':
@@ -1197,14 +1197,14 @@ class GatewayHandler(http.server.BaseHTTPRequestHandler):
         """Record usage to analytics DB with deduplication.
 
         NOTE: Since nanobot core v2 (unified UsageRecorder), the agent loop
-        writes usage directly to SQLite.  Gateway no longer needs to record
+        writes usage directly to SQLite.  Webserver no longer needs to record
         usage from SSE/worker.  This method is now a no-op to avoid duplicate
         rows.  The /api/usage read routes remain unchanged.
         """
         # No-op: usage is now recorded by nanobot core (UsageRecorder in agent/loop.py).
         if usage:
             logger.debug(
-                f"Skipping gateway-side usage recording for {usage.get('session_key', '?')} "
+                f"Skipping webserver-side usage recording for {usage.get('session_key', '?')} "
                 f"(handled by nanobot core UsageRecorder)"
             )
         return
@@ -1257,7 +1257,7 @@ if __name__ == '__main__':
         pid = os.fork()
         if pid > 0:
             # Parent: print PID and exit immediately
-            print(f"Gateway daemonized (pid={pid})")
+            print(f"Webserver daemonized (pid={pid})")
             sys.exit(0)
         # Child: new session, second fork
         os.setsid()
@@ -1277,12 +1277,12 @@ if __name__ == '__main__':
 
     class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         daemon_threads = True
-    server = ThreadedHTTPServer(('127.0.0.1', PORT), GatewayHandler)
-    logger.info(f"Gateway starting on http://localhost:{PORT}")
+    server = ThreadedHTTPServer(('127.0.0.1', PORT), WebServerHandler)
+    logger.info(f"Webserver starting on http://localhost:{PORT}")
     logger.info(f"Worker: {WORKER_URL}")
     logger.info(f"Log file: {LOG_FILE}")
     if not DAEMONIZE:
-        print(f"🐈 nanobot Gateway running at http://localhost:{PORT}")
+        print(f"🐈 nanobot Web Chat running at http://localhost:{PORT}")
         print(f"   Worker: {WORKER_URL}")
         print(f"   Health: http://localhost:{PORT}/api/health")
         print(f"   Log: {LOG_FILE}")
@@ -1292,6 +1292,6 @@ if __name__ == '__main__':
         server.serve_forever()
     except KeyboardInterrupt:
         if not DAEMONIZE:
-            print("\n👋 Gateway stopped.")
-        logger.info("Gateway stopped by user")
+            print("\n👋 Webserver stopped.")
+        logger.info("Webserver stopped by user")
         server.server_close()

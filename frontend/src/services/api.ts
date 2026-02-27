@@ -1,4 +1,4 @@
-// API service layer — talks to gateway.py (port 8081 via Vite proxy)
+// API service layer — talks to webserver.py (port 8081 via Vite proxy)
 
 import type { Session, Message } from '@/types';
 
@@ -176,7 +176,7 @@ export function attachTask(
         if (status.progress && status.progress.length > 0) {
           callbacks.onProgressSync(status.progress);
         } else if (status.progress_count) {
-          // Fallback: gateway restarted, no full progress available
+          // Fallback: webserver restarted, no full progress available
           callbacks.onProgressSync([`⏳ 任务后台执行中... (${status.progress_count} 步)`]);
         }
         
@@ -365,7 +365,7 @@ export function sendMessageStream(
         }
 
         // Stream ended — check if we received an explicit done/error event.
-        // If not, the connection was likely interrupted (e.g. gateway restart)
+        // If not, the connection was likely interrupted (e.g. webserver restart)
         // and the task may still be running in the worker background.
         if (!receivedDoneOrError) {
           callbacks.onError('SSE connection reset — task may still be running');

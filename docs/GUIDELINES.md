@@ -16,7 +16,7 @@ nanobot agent 在 Web UI 模式下运行在 **worker 进程内**（SDK 模式）
 | 风险级别 | 涉及修改的文件 | 推荐执行渠道 | 原因 |
 |----------|---------------|-------------|------|
 | 🟢 安全 | 前端 `.tsx`/`.css`/`.ts`、文档 `.md`、配置文件 | **Web UI** ✅ | 不需要重启任何进程 |
-| 🟡 低风险 | `gateway.py` | **Web UI** ✅ | 优雅降级保护：gateway 重启后 worker 内 agent 继续运行 |
+| 🟡 低风险 | `webserver.py` | **Web UI** ✅ | 优雅降级保护：webserver 重启后 worker 内 agent 继续运行 |
 | 🔴 高风险 | `worker.py`、nanobot 核心代码（`nanobot/` 目录） | **CLI** ⚠️ | kill worker = kill 自己 |
 
 ### 1.3 高风险任务必须使用 CLI
@@ -56,7 +56,7 @@ CLI 模式下我是独立进程，可以安全地修改和重启服务。
 | 修改内容 | 是否需要重启 | 处理方式 |
 |----------|-------------|---------|
 | 前端 `.tsx`/`.css` | ❌ | `vite build` 后告知用户刷新浏览器 |
-| `gateway.py` | ✅ | 修改 + commit，**告知用户手动重启**（优雅降级保护） |
+| `webserver.py` | ✅ | 修改 + commit，**告知用户手动重启**（优雅降级保护） |
 | `worker.py` | ✅ | 修改 + commit，**告知用户手动重启**。⚠️ Web UI 模式下**禁止**自行 kill worker |
 | nanobot 核心代码 | ✅ | 修改 + commit，**告知用户手动重启 worker** |
 | 文档 `.md` | ❌ | 直接修改 |
@@ -65,7 +65,7 @@ CLI 模式下我是独立进程，可以安全地修改和重启服务。
 
 ```
 ⚠️ 本次修改涉及 worker.py / 后端代码，需要手动重启服务才能生效：
-   cd ~/.nanobot/workspace/web-chat && bash restart-gateway.sh all
+   cd ~/.nanobot/workspace/web-chat && bash restart.sh all
 ```
 
 ### 1.7 复杂任务拆分策略
@@ -74,8 +74,8 @@ CLI 模式下我是独立进程，可以安全地修改和重启服务。
 
 ```
 Step 1 (Web UI 安全执行): 修改前端代码 + vite build + commit
-Step 2 (Web UI 安全执行): 修改 gateway.py + commit（不重启）
-Step 3 (CLI 或手动操作): 修改 worker.py + commit → 用户手动 restart-gateway.sh all
+Step 2 (Web UI 安全执行): 修改 webserver.py + commit（不重启）
+Step 3 (CLI 或手动操作): 修改 worker.py + commit → 用户手动 restart.sh all
 Step 4 (Web UI 安全执行): 验证 + 测试
 ```
 
@@ -83,7 +83,7 @@ Step 4 (Web UI 安全执行): 验证 + 测试
 
 | 事故时间 | Phase | 触发场景 | 后果 |
 |----------|-------|---------|------|
-| 2026-02-25 23:50 | Phase 11 | 修改 gateway.py + 重启 | SSE 断开，任务中断 |
+| 2026-02-25 23:50 | Phase 11 | 修改 webserver.py + 重启 | SSE 断开，任务中断 |
 | 2026-02-26 ~23:15 | Phase 26 | 修改 worker.py + kill worker | nanobot 自杀，转 CLI 恢复 |
 | 2026-02-26 ~23:42 | Phase 27 | 修改 worker.py + kill worker | nanobot 自杀，转 CLI 恢复 |
 
@@ -108,7 +108,7 @@ Step 4 (Web UI 安全执行): 验证 + 测试
 
 ### 3.1 日志文件位置
 
-- Gateway 日志：`/tmp/nanobot-gateway.log`
+- Webserver 日志：`/tmp/nanobot-webserver.log`
 - Worker 日志：`/tmp/nanobot-worker.log`
 
 ### 3.2 日志级别

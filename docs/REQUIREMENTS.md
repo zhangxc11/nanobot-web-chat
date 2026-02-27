@@ -1201,10 +1201,50 @@ Step 4 (Web UI 安全执行):
 
 ---
 
-### 手动维护的backlog
+---
+
+## 二十六、迭代反馈 (v3.5)
+
+> 2026-02-27 命名优化 + URL 编码 Bug 修复
+
+### Issue #36：Web Chat 的 gateway 与 nanobot 核心 gateway 命名混淆
+
+**现象**：
+1. Web Chat 项目中的 `gateway.py` 与 nanobot 核心仓库的 `gateway` 概念经常混淆
+2. 日志文件 `/tmp/nanobot-gateway.log`、PID 文件 `/tmp/nanobot-gateway.pid`、重启脚本 `restart-gateway.sh` 等命名都使用 "gateway"
+3. 在讨论和文档中需要额外说明"web-chat 的 gateway"还是"nanobot 的 gateway"
+
+**解决方案**：
+- 将 `gateway.py` 重命名为 `webserver.py`（Web Chat 的 HTTP 服务器 + API 网关 + 静态文件服务）
+- `restart-gateway.sh` 重命名为 `restart.sh`
+- 日志文件：`/tmp/nanobot-gateway.log` → `/tmp/nanobot-webserver.log`
+- PID 文件：`/tmp/nanobot-gateway.pid` → `/tmp/nanobot-webserver.pid`
+- 代码内部的 logger name、service name 等同步更新
+- 更新所有文档中的引用
+
+### Issue #37 (Bug)：文件名含 URL 编码字符的 Session 无法显示和删除
+
+**现象**：
+1. 文件名为 `test%3Ainject_e2e2.jsonl` 的 session 在列表中可见
+2. 但点击后消息无法加载（显示 "Session not found"）
+3. 删除操作也失败
+
+**根因**：
+- 后端 `_parse_path()` 不对 URL 路径做 decode
+- 前端用 `encodeURIComponent("test%3Ainject_e2e2")` 发请求，`%` 被编码为 `%25`
+- 后端收到 `test%253Ainject_e2e2`，与实际文件名 `test%3Ainject_e2e2` 不匹配
+- 本质是**双重 URL 编码**问题
+
+**修复方案**：
+- 在 `_parse_path()` 中对 path 做 `urllib.parse.unquote()` 解码
+- 这样无论前端是否编码，后端都能正确匹配文件名
+
+---
+
+### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
 
-1、web-chat的gateway，跟nanobot本身的gateway，这两个经常容易弄混，把web-chat的gateway的名字改成别的，避免混淆。
+（当前无待处理 backlog）
 
 *本文档将随需求迭代持续更新。*
