@@ -234,8 +234,10 @@ def _run_task_sdk(session_key: str, message: str):
             task['error'] = str(e)
             logger.error(f"Task error: session={session_key}, error={e}", exc_info=True)
         finally:
-            task['finished_at'] = datetime.now().isoformat()
-            task['_finished_ts'] = time.time()
+            # Guard: if kill already marked the task, don't overwrite
+            if task['_finished_ts'] == 0:
+                task['finished_at'] = datetime.now().isoformat()
+                task['_finished_ts'] = time.time()
 
             usage_data = task.get('_usage')
             if usage_data:
@@ -247,7 +249,7 @@ def _run_task_sdk(session_key: str, message: str):
                 if usage_data:
                     done_payload['usage'] = usage_data
                 _notify_sse(task, 'done', done_payload)
-            else:
+            elif task['status'] == 'error':
                 _notify_sse(task, 'error', {'message': task.get('error', 'Unknown error')})
 
             # Clear SSE clients
@@ -394,12 +396,18 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         logger.info(f"Stream: session={session_key}, message={message[:80]}...")
 
         # Check if there's already a running task for this session
+        # NOTE: Do NOT call _attach_to_existing_task inside the lock!
+        # It blocks in a while-loop, which would deadlock all other requests.
+        existing = None
         with _tasks_lock:
-            existing = _tasks.get(session_key)
-            if existing and existing['status'] == 'running':
-                logger.warning(f"Task already running for session={session_key}, attaching SSE")
-                self._attach_to_existing_task(existing)
-                return
+            t = _tasks.get(session_key)
+            if t and t['status'] == 'running':
+                existing = t
+
+        if existing:
+            logger.warning(f"Task already running for session={session_key}, attaching SSE")
+            self._attach_to_existing_task(existing)
+            return
 
         # Start SDK task
         _run_task_sdk(session_key, message)
@@ -496,6 +504,14 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             logger.info(f"Cancelled task: session={session_key}")
         else:
             logger.warning(f"No future to cancel: session={session_key}")
+
+        # Immediately mark task as cancelled so that SSE waiters and
+        # new requests don't keep treating it as "running".
+        task['status'] = 'error'
+        task['error'] = 'Cancelled by user'
+        task['finished_at'] = datetime.now().isoformat()
+        task['_finished_ts'] = time.time()
+        _notify_sse(task, 'error', {'message': 'Cancelled by user'})
 
         self._send_json({'status': 'cancelled', 'message': 'Task cancellation requested'})
 
