@@ -18,9 +18,10 @@ const EMPTY_TASK: SessionTask = {
 // ── Slash command definitions ──
 
 const HELP_TEXT = `🐈 nanobot commands:
-/new  — 开始新对话（归档当前历史）
-/stop — 停止正在执行的任务
-/help — 显示此帮助信息`;
+/new   — 开始新对话（创建新 session）
+/flush — 归档当前记忆并清空对话
+/stop  — 停止正在执行的任务
+/help  — 显示此帮助信息`;
 
 /** Create a local system message (not persisted to JSONL) */
 function _makeSystemMsg(content: string): Message {
@@ -144,7 +145,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         }
 
         case '/new': {
-          // Prevent /new while task is running
+          // Frontend-only: create a new session and switch to it
           if (task.sending) {
             set((s) => ({
               messages: [...s.messages, _makeSystemMsg('任务执行中，请先 /stop 停止任务再执行 /new。')],
@@ -152,12 +153,44 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             return;
           }
 
-          // Backend command: send to agent loop for session archival
-          // Show the command as user message
+          try {
+            const newSession = await useSessionStore.getState().createSession();
+            if (newSession) {
+              set(() => ({
+                messages: [],
+                hasMore: false,
+                error: null,
+              }));
+              set((s) => ({
+                messages: [...s.messages, _makeSystemMsg('✅ 已创建新对话。')],
+              }));
+            } else {
+              set((s) => ({
+                messages: [...s.messages, _makeSystemMsg('❌ 创建新对话失败。')],
+              }));
+            }
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            set((s) => ({
+              messages: [...s.messages, _makeSystemMsg(`❌ 创建新对话失败: ${errorMsg}`)],
+            }));
+          }
+          return;
+        }
+
+        case '/flush': {
+          // Backend command: archive memory and clear current session
+          if (task.sending) {
+            set((s) => ({
+              messages: [...s.messages, _makeSystemMsg('任务执行中，请先 /stop 停止任务再执行 /flush。')],
+            }));
+            return;
+          }
+
           const cmdMsg: Message = {
             id: `temp_${Date.now()}`,
             role: 'user',
-            content: '/new',
+            content: '/flush',
             timestamp: new Date().toISOString(),
           };
           set((s) => ({
@@ -173,7 +206,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
           try {
             await new Promise<void>((resolve, reject) => {
-              const controller = api.sendMessageStream(sessionId, '/new', {
+              const controller = api.sendMessageStream(sessionId, '/flush', {
                 onProgress: (step) => {
                   set((s) => {
                     const cur = s.taskBySession[sessionId] || { ...EMPTY_TASK };
@@ -188,7 +221,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               set((s) => _updateTask(s, sessionId, { abortController: controller }));
             });
 
-            // /new completed — reload messages (should be empty) + refresh session list
+            // /flush completed — reload messages (should be empty) + refresh session list
             await _reloadMessages(sessionId, set);
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
