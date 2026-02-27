@@ -194,6 +194,26 @@ export function attachTask(
   return controller;
 }
 
+// ── Image Upload ──
+
+export interface UploadResult {
+  path: string;   // server file path (for sending to worker)
+  url: string;    // URL for displaying in browser
+  filename: string;
+  size: number;
+}
+
+export async function uploadImage(file: File): Promise<UploadResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE}/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+  return res.json();
+}
+
 // ── Usage Statistics ──
 
 export interface UsageByModel {
@@ -284,17 +304,23 @@ export function sendMessageStream(
   sessionId: string,
   message: string,
   callbacks: StreamCallbacks,
+  images?: string[],
 ): AbortController {
   const controller = new AbortController();
 
   (async () => {
     try {
+      const body: Record<string, unknown> = { message };
+      if (images && images.length > 0) {
+        body.images = images;
+      }
+
       const res = await fetch(
         `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/messages`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message }),
+          body: JSON.stringify(body),
           signal: controller.signal,
         }
       );

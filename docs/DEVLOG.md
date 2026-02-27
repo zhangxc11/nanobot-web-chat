@@ -1097,6 +1097,42 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 
 ---
 
+## Phase 32: 图片输入功能 (Issue #38) 🔜 进行中
+
+> 对应需求 §二十七 Issue #38
+> 支持用户在 Web Chat 中发送图片，利用 Claude 多模态能力理解图片内容
+
+### 任务拆解
+
+由于涉及 worker.py 和 nanobot 核心修改（🔴高风险），在 CLI 中执行全部改动。
+
+#### Step 1: nanobot 核心 — media 参数透传
+- 🔜 **T32.1** `process_direct()` 增加 `media` 参数，透传给 `_build_user_content()`
+- **T32.2** `AgentRunner.run()` 增加 `media` 参数，透传给 `process_direct()`
+- **T32.3** 测试：CLI 模式下发送图片消息验证
+
+#### Step 2: Worker — 接收并传递 media
+- **T32.4** `worker.py` execute-stream 端点接收 `images` 字段
+- **T32.5** 传递给 `runner.run(media=images)`
+
+#### Step 3: Webserver — 图片上传 + 静态服务
+- **T32.6** `webserver.py` 新增 `POST /api/upload` — 图片上传 API
+- **T32.7** `webserver.py` 新增 `GET /api/uploads/<date>/<filename>` — 图片静态服务
+- **T32.8** `webserver.py` 转发 images 给 worker
+
+#### Step 4: 前端 — 图片交互
+- **T32.9** ChatInput 增加图片选择/拖拽/粘贴功能
+- **T32.10** 图片预览缩略图 + 移除按钮
+- **T32.11** 发送时上传图片 + 附带路径
+- **T32.12** MessageItem 中显示用户消息里的图片
+
+#### Step 5: 重启 + 验证
+- **T32.13** `restart.sh all` 重启服务
+- **T32.14** 端到端测试：上传图片 → 发送 → Claude 理解 → 回复
+- **T32.15** Git commit
+
+---
+
 *每次 session 更新此文件后 commit。*
 
 ---

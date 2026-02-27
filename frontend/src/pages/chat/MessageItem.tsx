@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Message } from '@/types';
+import type { Message, ContentBlock } from '@/types';
 import { MarkdownRenderer } from '@/components/Markdown';
 import styles from './MessageList.module.css';
 
@@ -13,6 +13,26 @@ export interface UsageRecord {
   llm_calls: number;
   started_at: string;
   finished_at: string;
+}
+
+/** Extract text content from a message (handles both string and multimodal array) */
+function getTextContent(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(b => b.type === 'text' && b.text)
+      .map(b => b.text!)
+      .join('\n');
+  }
+  return '';
+}
+
+/** Extract image URLs from multimodal content */
+function getImageUrls(content: string | ContentBlock[]): string[] {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter(b => b.type === 'image_url' && b.image_url?.url)
+    .map(b => b.image_url!.url);
 }
 
 interface MessageItemProps {
@@ -165,7 +185,7 @@ export default function MessageItem({ message }: MessageItemProps) {
     return (
       <div className={`${styles.message} ${styles.assistantMessage}`}>
         <div className={styles.bubble}>
-          <ToolCallLine name={message.name || 'unknown'} content={content} />
+          <ToolCallLine name={message.name || 'unknown'} content={getTextContent(content)} />
         </div>
       </div>
     );
@@ -177,12 +197,23 @@ export default function MessageItem({ message }: MessageItemProps) {
   }
 
   const isUser = role === 'user';
+  const textContent = getTextContent(content);
+  const imageUrls = isUser ? getImageUrls(content) : [];
 
   return (
     <div className={`${styles.message} ${isUser ? styles.userMessage : styles.assistantMessage}`}>
       <div className={styles.bubble}>
+        {imageUrls.length > 0 && (
+          <div className={styles.messageImages}>
+            {imageUrls.map((url, i) => (
+              <a key={i} href={url} target="_blank" rel="noopener noreferrer" className={styles.messageImageLink}>
+                <img src={url} alt={`image ${i + 1}`} className={styles.messageImage} loading="lazy" />
+              </a>
+            ))}
+          </div>
+        )}
         <div className={styles.content}>
-          {isUser ? content : <MarkdownRenderer content={content} />}
+          {isUser ? textContent : <MarkdownRenderer content={textContent} />}
         </div>
         {timestamp && (
           <div className={styles.timestamp}>{formatTimestamp(timestamp)}</div>
@@ -245,7 +276,8 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
   let finalReplyMsg: Message | null = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg.role === 'assistant' && (!msg.toolCalls || msg.toolCalls.length === 0) && msg.content) {
+    const text = getTextContent(msg.content);
+    if (msg.role === 'assistant' && (!msg.toolCalls || msg.toolCalls.length === 0) && text) {
       finalReplyMsg = msg;
       break;
     }
@@ -262,10 +294,11 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
 
     if (msg.role === 'assistant') {
       // Preceding text from assistant messages with tool_calls
-      if (msg.content && msg.content.trim()) {
+      const text = getTextContent(msg.content);
+      if (text && text.trim()) {
         processItems.push({
           type: 'text',
-          content: msg.content.trim(),
+          content: text.trim(),
           key: `text_${msg.id}`,
         });
       }
@@ -281,7 +314,7 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
             type: 'tool',
             id: tc.id,
             name: tc.name,
-            content: toolResult?.content || '(等待结果…)',
+            content: getTextContent(toolResult?.content || '(等待结果…)'),
             args: tc.arguments,
           });
           toolCount++;
@@ -298,7 +331,7 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
         type: 'tool',
         id: msg.id,
         name: msg.name || 'unknown',
-        content: msg.content,
+        content: getTextContent(msg.content),
       });
       toolCount++;
     }
@@ -337,7 +370,7 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
           )}
           {finalReplyMsg && (
             <div className={styles.turnTextSegment}>
-              <MarkdownRenderer content={finalReplyMsg.content} />
+              <MarkdownRenderer content={getTextContent(finalReplyMsg.content)} />
             </div>
           )}
         </div>

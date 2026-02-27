@@ -125,7 +125,7 @@ def _cleanup_old_tasks():
             del _tasks[k]
 
 
-def _run_task_sdk(session_key: str, message: str):
+def _run_task_sdk(session_key: str, message: str, images: list[str] | None = None):
     """Run nanobot agent via SDK in the async event loop. Updates task registry."""
     from nanobot.agent.callbacks import DefaultCallbacks, AgentResult
 
@@ -221,6 +221,7 @@ def _run_task_sdk(session_key: str, message: str):
                 session_key=session_key,
                 channel='web',
                 chat_id=session_key.split(':', 1)[-1] if ':' in session_key else session_key,
+                media=images,
                 callbacks=WorkerCallbacks(),
             )
             task['status'] = 'done'
@@ -392,8 +393,9 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             return
         session_key = data['session_key'].strip()
         message = data['message'].strip()
+        images = data.get('images') or None  # list of file paths or None
 
-        logger.info(f"Stream: session={session_key}, message={message[:80]}...")
+        logger.info(f"Stream: session={session_key}, message={message[:80]}..., images={len(images) if images else 0}")
 
         # Check if there's already a running task for this session
         # NOTE: Do NOT call _attach_to_existing_task inside the lock!
@@ -410,7 +412,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             return
 
         # Start SDK task
-        _run_task_sdk(session_key, message)
+        _run_task_sdk(session_key, message, images=images)
 
         # Wait briefly for task to register
         time.sleep(0.05)

@@ -36,6 +36,7 @@ for i, arg in enumerate(sys.argv):
 
 SESSIONS_DIR = os.path.expanduser('~/.nanobot/workspace/sessions')
 MEMORY_DIR = os.path.expanduser('~/.nanobot/workspace/memory')
+UPLOADS_DIR = os.path.expanduser('~/.nanobot/workspace/uploads')
 CONFIG_FILE = os.path.expanduser('~/.nanobot/config.json')
 USER_SKILLS_DIR = os.path.expanduser('~/.nanobot/workspace/skills')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -165,6 +166,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_daily_usage(params)
             return
 
+        if path.startswith('/api/uploads/'):
+            self._handle_serve_upload(path)
+            return
+
         if path.startswith('/api/skills/'):
             self._handle_skill_routes(path)
             return
@@ -192,6 +197,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
         if path == '/api/sessions':
             self._handle_create_session()
+            return
+
+        if path == '/api/upload':
+            self._handle_upload()
             return
 
         route_params = self._match_route(path, '/api/sessions/:id/messages')
@@ -282,6 +291,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
                         if role == 'user' and not first_user_content:
                             content = obj.get('content', '')
+                            if isinstance(content, list):
+                                # Multimodal: extract text from content array
+                                text_parts = [c.get('text', '') for c in content if c.get('type') == 'text']
+                                content = ' '.join(text_parts)
                             content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
                             first_user_content = content[:80] if content else ''
             except Exception as e:
@@ -365,7 +378,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
                 if role == 'user':
                     content = msg['content']
-                    msg['content'] = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
+                    # content may be a string or a list (multimodal: images + text)
+                    if isinstance(content, str):
+                        msg['content'] = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
+                    # If content is a list (multimodal), pass it through as-is
 
                 all_messages.append(msg)
 
@@ -536,6 +552,11 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
                         role = obj.get('role', '')
                         content = obj.get('content', '')
+
+                        # Handle multimodal content (list of text/image blocks)
+                        if isinstance(content, list):
+                            text_parts = [c.get('text', '') for c in content if c.get('type') == 'text']
+                            content = ' '.join(text_parts)
                         if not content or not isinstance(content, str):
                             continue
 
@@ -1074,15 +1095,21 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'error': 'Empty message'}, 400)
             return
 
+        images = data.get('images') or None  # list of file paths or None
+
         session_key = self._get_session_key(session_id)
-        logger.info(f"Send message to session {session_id} (key={session_key}): {message[:80]}...")
+        logger.info(f"Send message to session {session_id} (key={session_key}): {message[:80]}..., images={len(images) if images else 0}")
 
         # Forward to worker's SSE streaming endpoint
         try:
-            worker_data = json.dumps({
+            worker_payload = {
                 'session_key': session_key,
                 'message': message,
-            }).encode('utf-8')
+            }
+            if images:
+                worker_payload['images'] = images
+
+            worker_data = json.dumps(worker_payload).encode('utf-8')
 
             req = urllib.request.Request(
                 f'{WORKER_URL}/execute-stream',
@@ -1192,6 +1219,134 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
     # Key: (session_key, finished_at, model, total_tokens)
     _recorded_usage = set()
     _recorded_usage_lock = threading.Lock()
+
+    # ── Upload / Image serving ──
+
+    def _handle_upload(self):
+        """POST /api/upload — upload an image file, return path and URL."""
+        import uuid
+        from datetime import date
+
+        content_type = self.headers.get('Content-Type', '')
+        if 'multipart/form-data' not in content_type:
+            self._send_json({'error': 'Expected multipart/form-data'}, 400)
+            return
+
+        # Parse boundary
+        boundary = None
+        for part in content_type.split(';'):
+            part = part.strip()
+            if part.startswith('boundary='):
+                boundary = part[9:].strip('"')
+                break
+
+        if not boundary:
+            self._send_json({'error': 'Missing boundary in Content-Type'}, 400)
+            return
+
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+
+        # Simple multipart parser: find file data between boundaries
+        boundary_bytes = ('--' + boundary).encode()
+        parts = body.split(boundary_bytes)
+
+        file_data = None
+        filename = 'upload'
+        file_content_type = 'application/octet-stream'
+
+        for part in parts:
+            if b'Content-Disposition' not in part:
+                continue
+            # Parse headers and body
+            header_end = part.find(b'\r\n\r\n')
+            if header_end < 0:
+                continue
+            headers_raw = part[:header_end].decode('utf-8', errors='replace')
+            file_body = part[header_end + 4:]
+            # Strip trailing \r\n
+            if file_body.endswith(b'\r\n'):
+                file_body = file_body[:-2]
+
+            if 'name="file"' in headers_raw or 'name="image"' in headers_raw:
+                file_data = file_body
+                # Extract filename
+                import re as _re
+                fn_match = _re.search(r'filename="([^"]+)"', headers_raw)
+                if fn_match:
+                    filename = fn_match.group(1)
+                # Extract content type
+                ct_match = _re.search(r'Content-Type:\s*(\S+)', headers_raw)
+                if ct_match:
+                    file_content_type = ct_match.group(1)
+
+        if not file_data:
+            self._send_json({'error': 'No file found in upload'}, 400)
+            return
+
+        # Validate it's an image
+        if not file_content_type.startswith('image/'):
+            self._send_json({'error': f'Not an image: {file_content_type}'}, 400)
+            return
+
+        # Determine extension
+        ext = os.path.splitext(filename)[1].lower()
+        if not ext:
+            ext_map = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp'}
+            ext = ext_map.get(file_content_type, '.png')
+
+        # Save to uploads/<date>/<uuid>.<ext>
+        today = date.today().isoformat()
+        upload_dir = os.path.join(UPLOADS_DIR, today)
+        os.makedirs(upload_dir, exist_ok=True)
+
+        file_id = uuid.uuid4().hex[:12]
+        save_filename = f'{file_id}{ext}'
+        save_path = os.path.join(upload_dir, save_filename)
+
+        with open(save_path, 'wb') as f:
+            f.write(file_data)
+
+        url = f'/api/uploads/{today}/{save_filename}'
+        logger.info(f"Upload: {filename} → {save_path} ({len(file_data)} bytes)")
+
+        self._send_json({
+            'path': save_path,
+            'url': url,
+            'filename': save_filename,
+            'size': len(file_data),
+        })
+
+    def _handle_serve_upload(self, path):
+        """GET /api/uploads/<date>/<filename> — serve uploaded image."""
+        # path is like /api/uploads/2026-02-27/abc123.png
+        rel_path = path[len('/api/uploads/'):]
+
+        # Security: prevent directory traversal
+        if '..' in rel_path or rel_path.startswith('/'):
+            self._send_json({'error': 'Invalid path'}, 400)
+            return
+
+        filepath = os.path.join(UPLOADS_DIR, rel_path)
+        if not os.path.isfile(filepath):
+            self._send_json({'error': 'Not found'}, 404)
+            return
+
+        # Serve the file
+        mime, _ = mimetypes.guess_type(filepath)
+        if not mime:
+            mime = 'application/octet-stream'
+
+        with open(filepath, 'rb') as f:
+            data = f.read()
+
+        self.send_response(200)
+        self.send_header('Content-Type', mime)
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Cache-Control', 'public, max-age=86400')  # 1 day cache
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(data)
 
     def _try_record_usage(self, usage):
         """Record usage to analytics DB with deduplication.

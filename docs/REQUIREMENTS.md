@@ -1241,6 +1241,169 @@ Step 4 (Web UI 安全执行):
 
 ---
 
+---
+
+## 二十七、图片输入功能 (v4.0)
+
+> 2026-02-27 支持用户在 Web Chat 中发送图片，利用 Claude 多模态能力理解图片内容
+
+### Issue #38：Web Chat 不支持图片输入
+
+**现象**：
+1. 用户在 Web Chat 中无法发送图片
+2. Claude 模型本身支持多模态图片理解，但 Web Chat 前端没有图片上传入口
+3. nanobot 核心的 `_build_user_content()` **已经支持** `media` 参数（本地文件路径列表），会自动读取、base64 编码、构建多模态消息
+4. 但 SDK 层（`AgentRunner.run()` 和 `process_direct()`）未暴露 `media` 参数
+
+**整体数据流**：
+
+```
+前端拖入/粘贴图片 → base64 预览 + 上传到 webserver → 保存到 uploads/ 目录
+                                                    ↓
+发送消息时 → POST {message, images: [path1, path2]} → webserver 转发给 worker
+                                                       ↓
+worker → AgentRunner.run(message, media=[path1, path2])
+                                                       ↓
+nanobot 核心 → _build_user_content() 已支持 base64 编码图片 ✅
+                                                       ↓
+Claude API → 多模态理解 → 回复
+```
+
+**需要改动的组件**：
+
+| 组件 | 改动 | 风险 |
+|------|------|------|
+| **nanobot 核心** | `process_direct()` + `AgentRunner.run()` 增加 `media` 参数透传 | 🔴 高风险（需重启 worker） |
+| **worker.py** | 接收 `images` 字段，传给 `runner.run(media=...)` | 🔴 高风险（需重启 worker） |
+| **webserver.py** | 图片上传 API + 图片静态服务 + 转发 images 给 worker | 🟡 中风险 |
+| **前端** | 拖拽/粘贴图片 + 缩略图预览 + 发送 + 消息中显示图片 | 🟢 安全 |
+
+#### 图片存储方案
+
+```
+~/.nanobot/workspace/uploads/
+  ├── 2026-02-27/
+  │   ├── abc123.png
+  │   ├── def456.jpg
+  │   └── ...
+  └── 2026-02-28/
+      └── ...
+```
+
+- 按日期分目录，文件名用 UUID 避免冲突
+- 上传时返回文件路径，发送消息时传路径给后端
+- 图片通过 `/api/uploads/<date>/<filename>` 提供静态访问（消息中显示用）
+
+#### 后端 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/upload` | 上传图片，返回文件路径 |
+| GET | `/api/uploads/<date>/<filename>` | 静态访问已上传图片 |
+
+**POST /api/upload 请求**：
+- Content-Type: `multipart/form-data`
+- Body: `file` 字段（图片二进制）
+- 响应: `{ "path": "/path/to/uploads/2026-02-27/abc123.png", "url": "/api/uploads/2026-02-27/abc123.png" }`
+
+**Worker execute-stream 请求扩展**：
+```json
+{
+  "session_key": "webchat:xxx",
+  "message": "这张图片里有什么？",
+  "images": ["/path/to/uploads/2026-02-27/abc123.png"]
+}
+```
+
+#### 前端交互设计
+
+**输入区域**：
+```
+┌──────────────────────────────────────────────────────┐
+│ [📎 缩略图1] [📎 缩略图2] [× 移除]                    │  ← 图片预览区（有图片时显示）
+├──────────────────────────────────────────────────────┤
+│ [📎] 输入消息...                        [发送]        │  ← 添加图片按钮 + 输入框
+└──────────────────────────────────────────────────────┘
+```
+
+**图片输入方式**：
+1. 点击 📎 按钮选择文件
+2. 拖拽图片到输入区域
+3. 粘贴剪贴板中的图片（Ctrl/Cmd+V）
+
+**图片预览**：
+- 上传前使用 FileReader 读取 base64 本地预览
+- 上传后替换为服务端 URL
+- 缩略图固定高度（如 80px），可点击查看大图
+- 每张图片右上角有 × 移除按钮
+
+**消息中的图片显示**：
+- 用户消息中的图片以缩略图形式显示
+- 点击可查看大图（lightbox 或新标签页）
+- 需要从 JSONL 中的 `content` 数组解析 `image` 类型项
+
+#### nanobot 核心改动
+
+**`process_direct()` 签名扩展**：
+```python
+async def process_direct(
+    self,
+    content: str,
+    session_key: str = "cli:direct",
+    channel: str = "cli",
+    chat_id: str = "direct",
+    media: list[str] | None = None,  # ← 新增
+    on_progress: ...,
+    callbacks: ...,
+) -> str:
+```
+
+**`AgentRunner.run()` 签名扩展**：
+```python
+async def run(
+    self,
+    message: str,
+    session_key: str,
+    media: list[str] | None = None,  # ← 新增
+    callbacks: ...,
+) -> AgentResult:
+```
+
+#### 实施策略
+
+由于涉及 worker.py 和 nanobot 核心修改（🔴高风险），按照 Issue #32 安全规则：
+1. **前端 + webserver 改动**：可在 Web UI 中安全执行
+2. **nanobot 核心 + worker.py 改动**：必须在 CLI 中执行，完成后手动 `restart.sh all`
+
+---
+
+## 二十八、Bug 修复 (v4.0.1)
+
+> 2026-02-27 Web Chat 消息显示问题
+
+### Issue #39：agent 使用 message 工具发送的内容在 Web Chat 中不显示
+
+**现象**：
+1. agent 在 web chat session 中调用 `message` 工具发送回复
+2. 工具返回 "Message sent to web:xxx"（成功）
+3. 但消息内容实际上没有到达前端
+4. 前端只看到一个折叠的工具调用块（需展开才能看到 agent 的前置文本），最终回复为空
+
+**根因**：
+1. **Worker MessageBus 无 subscriber**：`AgentRunner.from_config()` 创建的 `MessageBus` 没有注册任何 outbound subscriber。`MessageTool` 通过 `bus.publish_outbound()` 发送消息，但无人接收，消息丢失。
+2. **前端渲染**：最后一个 assistant turn 结构为 `[assistant(content+toolCalls), tool(result), assistant(null)]`。`finalReplyMsg` 查找逻辑要求 `content` 非空且无 `toolCalls`，最后一条 assistant 的 content 为 null 不匹配，导致整个 turn 只有折叠的工具调用区域。
+
+**影响**：这不是新 bug，而是 web chat 设计上的盲区 — 未预期 agent 会在 web chat 中使用 `message` 工具。在 IM 渠道（Telegram/Feishu）中 message 工具正常工作。
+
+**解决方案**（待定，优先级低）：
+- 方案 A：Worker 注册 bus outbound subscriber，将 `message` 工具内容转发为 SSE 事件
+- 方案 B：前端特殊处理 `message` 工具调用，将其 `arguments.content` 当作最终回复渲染
+- 方案 C：在 web chat 的 system prompt 中提示 agent 不需要使用 message 工具（直接回复即可）
+
+**状态**：已记录，暂不修复。图片功能开发优先。
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。

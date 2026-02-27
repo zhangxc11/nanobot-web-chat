@@ -24,7 +24,7 @@ interface MessageStore {
   draftBySession: Record<string, string>;       // per-session input draft text
   loadMessages: (sessionId: string) => Promise<void>;
   loadMoreMessages: (sessionId: string) => Promise<void>;
-  sendMessage: (sessionId: string, content: string) => Promise<void>;
+  sendMessage: (sessionId: string, content: string, images?: string[]) => Promise<void>;
   injectMessage: (sessionId: string, content: string) => Promise<void>;
   cancelTask: (sessionId: string) => Promise<void>;
   checkRunningTask: (sessionId: string) => Promise<void>;
@@ -96,7 +96,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }
   },
 
-  sendMessage: async (sessionId, content) => {
+  sendMessage: async (sessionId, content, images) => {
     // Prevent sending if THIS session already has a running task
     const task = get().getTask(sessionId);
     if (task.sending) return;
@@ -132,7 +132,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           },
           onDone: () => resolve(),
           onError: (msg) => reject(new Error(msg)),
-        });
+        }, images);
         set((s) => _updateTask(s, sessionId, { abortController: controller }));
       });
 

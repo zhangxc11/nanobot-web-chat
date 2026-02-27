@@ -18,11 +18,18 @@ export interface ToolCall {
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'tool';
-  content: string;
+  content: string | ContentBlock[];
   timestamp: string;
   toolCalls?: ToolCall[];
   toolCallId?: string;
   name?: string;
+}
+
+/** A content block in a multimodal message */
+export interface ContentBlock {
+  type: 'text' | 'image_url';
+  text?: string;
+  image_url?: { url: string };
 }
 
 /** A single progress step during task execution */

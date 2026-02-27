@@ -512,3 +512,33 @@
     opacity: 1;
   }
 }
+
+
+/* ── Message images ── */
+
+.messageImages {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.messageImageLink {
+  display: block;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  transition: border-color 0.2s;
+}
+
+.messageImageLink:hover {
+  border-color: var(--accent);
+}
+
+.messageImage {
+  max-width: 300px;
+  max-height: 300px;
+  object-fit: contain;
+  display: block;
+  background: var(--bg-primary);
+}

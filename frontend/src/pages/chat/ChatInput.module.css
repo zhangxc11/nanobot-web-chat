@@ -2,6 +2,12 @@
   padding: 12px 24px 16px;
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
+  transition: background 0.2s;
+}
+
+.inputArea.dragOver {
+  background: rgba(52, 152, 219, 0.1);
+  border-top-color: var(--accent);
 }
 
 .inputWrapper {
@@ -88,6 +94,98 @@
 }
 
 .injectButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Image preview ── */
+
+.imagePreviewArea {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+  max-width: 800px;
+  margin: 0 auto;
+  flex-wrap: wrap;
+}
+
+.imagePreview {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+.imagePreview.imageError {
+  border-color: #e74c3c;
+}
+
+.previewThumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.uploadingOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.removeImageBtn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.imagePreview:hover .removeImageBtn {
+  opacity: 1;
+}
+
+/* ── Attach button ── */
+
+.attachButton {
+  padding: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition: background 0.2s, border-color 0.2s;
+  flex-shrink: 0;
+}
+
+.attachButton:hover:not(:disabled) {
+  background: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+.attachButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
