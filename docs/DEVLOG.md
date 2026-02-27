@@ -1229,6 +1229,32 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 
 ---
 
+## Phase 34: Runtime Context 过滤统一收拢 (Issue #41) ✅
+
+> 对应需求 Issue #41
+
+### 问题
+webserver.py 中 5-6 处分散的 `[Runtime Context]` 过滤逻辑，代码重复且存在 bug：
+- multimodal 消息先拼接 text blocks 再 strip，空格分隔导致正则匹配失败
+- session 列表 summary 泄露 Runtime Context 内容
+
+### 修复
+1. 提取模块级 `strip_runtime_context(content)` 统一函数
+2. 预编译正则 `_RC_PATTERN = re.compile(r'(?:^|\n)\s*\[Runtime Context\].*', re.DOTALL)`
+3. 同时处理 string 和 multimodal list 两种格式
+4. 修复处理顺序：先 strip 再 flatten（先清理原始 content，再拼接 text）
+5. 所有 5 处调用统一替换
+
+### 改动文件
+- `webserver.py` — 新增 `strip_runtime_context()` 函数，替换 5 处分散过滤逻辑
+- `docs/REQUIREMENTS.md` — Issue #41
+- `docs/DEVLOG.md` — Phase 34 记录
+
+### Git
+- web-chat commit: `d895365`
+
+---
+
 ## Phase 31: Gateway 改名 Webserver + URL 编码 Bug 修复 (Issue #36/#37) ✅
 
 > 对应需求 §二十六 Issue #36 (命名优化)、Issue #37 (URL 编码 Bug)

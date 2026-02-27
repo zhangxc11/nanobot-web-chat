@@ -73,6 +73,33 @@ logger.addHandler(_fh)
 logger.addHandler(_sh)
 
 
+# ── Runtime Context stripping ──
+# nanobot appends [Runtime Context] metadata to user messages.
+# This must be stripped before returning to the frontend.
+_RC_PATTERN = re.compile(r'(?:^|\n)\s*\[Runtime Context\].*', re.DOTALL)
+
+def strip_runtime_context(content):
+    """Strip [Runtime Context] block from user message content.
+    
+    Handles both string content and multimodal content (list of blocks).
+    Returns cleaned content in the same format.
+    """
+    if isinstance(content, str):
+        return _RC_PATTERN.split(content)[0].strip()
+    if isinstance(content, list):
+        cleaned = []
+        for block in content:
+            if block.get('type') == 'text' and block.get('text'):
+                cleaned_text = _RC_PATTERN.split(block['text'])[0].strip()
+                if cleaned_text:
+                    cleaned.append({**block, 'text': cleaned_text})
+                # else: drop empty text blocks (pure [Runtime Context] blocks)
+            else:
+                cleaned.append(block)
+        return cleaned
+    return content
+
+
 class WebServerHandler(http.server.BaseHTTPRequestHandler):
     """REST API handler for nanobot Web Chat Server."""
 
@@ -291,11 +318,11 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
                         if role == 'user' and not first_user_content:
                             content = obj.get('content', '')
+                            content = strip_runtime_context(content)
                             if isinstance(content, list):
                                 # Multimodal: extract text from content array
                                 text_parts = [c.get('text', '') for c in content if c.get('type') == 'text']
                                 content = ' '.join(text_parts)
-                            content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
                             first_user_content = content[:80] if content else ''
             except Exception as e:
                 logger.error(f"Failed to read session {session_id}: {e}")
@@ -377,11 +404,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                     msg['name'] = obj.get('name', '')
 
                 if role == 'user':
-                    content = msg['content']
-                    # content may be a string or a list (multimodal: images + text)
-                    if isinstance(content, str):
-                        msg['content'] = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
-                    # If content is a list (multimodal), pass it through as-is
+                    msg['content'] = strip_runtime_context(msg['content'])
 
                 all_messages.append(msg)
 
@@ -553,7 +576,8 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                         role = obj.get('role', '')
                         content = obj.get('content', '')
 
-                        # Handle multimodal content (list of text/image blocks)
+                        # Strip runtime context first, then flatten multimodal
+                        content = strip_runtime_context(content)
                         if isinstance(content, list):
                             text_parts = [c.get('text', '') for c in content if c.get('type') == 'text']
                             content = ' '.join(text_parts)
@@ -562,17 +586,13 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
                         # Get summary from first user message
                         if role == 'user' and summary == session_id:
-                            # Strip [Runtime Context] block
-                            text = content.split('\n[Runtime Context]')[0].strip()
-                            if text:
-                                summary = text[:80]
+                            if content:
+                                summary = content[:80]
 
                         # Search in user messages
                         if role == 'user' and query in content.lower():
-                            # Extract a snippet around the match
-                            text = content.split('\n[Runtime Context]')[0].strip()
-                            if text and len(matches) < 3:  # max 3 matches per session
-                                snippet = text[:100]
+                            if content and len(matches) < 3:  # max 3 matches per session
+                                snippet = content[:100]
                                 matches.append(snippet)
 
                 display_name = custom_name or summary
@@ -785,7 +805,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                                 continue
                             if obj.get('role') == 'user' and not first_user_content:
                                 content = obj.get('content', '')
-                                content = re.split(r'\n\s*\[Runtime Context\]', content)[0].strip()
+                                content = strip_runtime_context(content)
+                                if isinstance(content, list):
+                                    text_parts = [c.get('text', '') for c in content if c.get('type') == 'text']
+                                    content = ' '.join(text_parts)
                                 first_user_content = content[:80] if content else ''
                         if not summary:
                             summary = first_user_content or session_id

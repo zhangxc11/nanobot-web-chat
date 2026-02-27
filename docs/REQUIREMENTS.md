@@ -1507,6 +1507,28 @@ if (trimmed.startsWith('/')) {
 
 ---
 
+### Issue #41：Runtime Context 过滤逻辑统一收拢 ✅
+
+**问题**：nanobot agent 在用户消息末尾追加 `[Runtime Context]` 元数据块（包含时间、channel、chat ID 等），这些内容不应在前端展示。之前在 webserver.py 的 5-6 处分散使用 `re.split()` 过滤，逻辑重复且不一致：
+- session 列表 summary：先拼接 multimodal text blocks 再 strip，导致空格分隔时正则匹配失败
+- 消息列表：每处重复写 string/list 两种格式的过滤逻辑
+- 搜索、analytics 等处各自独立实现
+
+**修复**：
+1. 提取统一的 `strip_runtime_context(content)` 模块级函数，同时处理 string 和 multimodal list 两种格式
+2. 使用预编译正则 `(?:^|\n)\s*\[Runtime Context\].*`（`re.DOTALL`），支持匹配字符串开头和换行后两种位置
+3. 对 multimodal list：逐 block 清理 text 内容，纯 RC 的 text block 直接移除
+4. 修复处理顺序：**先 strip 再 flatten**（先对原始 content 调用清理函数，再拼接 text），避免拼接后格式变化导致匹配失败
+5. 所有 5 处读取用户消息内容的地方统一调用此函数
+
+**影响范围**：
+- `_handle_get_sessions` — session 列表 summary
+- `_handle_get_messages` — 消息列表
+- `_handle_search_sessions` — 搜索结果
+- `_enrich_analytics_sessions` — analytics session 摘要
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
