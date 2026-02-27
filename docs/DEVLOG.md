@@ -1098,3 +1098,38 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 ---
 
 *每次 session 更新此文件后 commit。*
+
+---
+
+## Phase 31: Gateway 改名 Webserver + URL 编码 Bug 修复 (Issue #36/#37) ✅
+
+> 对应需求 §二十六 Issue #36 (命名优化)、Issue #37 (URL 编码 Bug)
+
+### T31.1 URL 编码 Bug 修复 (Issue #37) ✅
+
+**问题**：文件名含 `%3A` 的 session（如 `test%3Ainject_e2e2.jsonl`）无法加载消息和删除。
+**根因**：前端 `encodeURIComponent("test%3Ainject_e2e2")` 产生双重编码 `test%253Ainject_e2e2`，后端 `_parse_path()` 不做 URL decode，导致不匹配。
+**修复**：`_parse_path()` 中增加 `urllib.parse.unquote()` 解码。
+
+### T31.2 Gateway 改名为 Webserver (Issue #36) ✅
+
+**改动**：
+- `gateway.py` → `webserver.py`（文件重命名 + 内部 class/logger/service name 更新）
+- `restart-gateway.sh` → `restart.sh`（脚本重命名 + 子命令 `webserver` 替代 `gateway`）
+- 日志文件：`/tmp/nanobot-gateway.log` → `/tmp/nanobot-webserver.log`
+- `start.sh` 更新引用
+- `frontend/src/services/api.ts` 注释更新
+- `docs/GUIDELINES.md` 所有 gateway 引用更新
+
+### 改动文件
+- `gateway.py` → `webserver.py`
+- `restart-gateway.sh` → `restart.sh`
+- `start.sh`
+- `frontend/src/services/api.ts`
+- `docs/REQUIREMENTS.md` — §二十六 Issue #36/#37
+- `docs/GUIDELINES.md` — gateway → webserver
+- `docs/DEVLOG.md` — Phase 31 记录
+
+### Git
+- web-chat commit: `aeb2fa0`
+
