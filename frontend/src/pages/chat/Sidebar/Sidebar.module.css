@@ -305,6 +305,65 @@
   flex-shrink: 0;
 }
 
+/* ── Channel Groups ── */
+
+.channelGroup {
+  margin-bottom: 4px;
+}
+
+.channelGroupHeader {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.channelGroupHeader:hover {
+  background: var(--bg-hover);
+}
+
+.channelGroupArrow {
+  font-size: 10px;
+  color: var(--text-muted);
+  width: 12px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.channelGroupIcon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.channelGroupLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex: 1;
+}
+
+.channelGroupCount {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.channelGroupSessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 /* ── Session List ── */
 
 .sessionListContainer {

@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useSessionStore } from '@/store/sessionStore';
+import type { Session } from '@/types';
 import styles from './Sidebar.module.css';
 
 interface SessionItemProps {
@@ -38,10 +39,76 @@ function getDisplayTitle(summary: string, _sessionKey: string, id: string): stri
     if (id.startsWith('webchat_')) return '新对话';
     if (id.startsWith('cli_')) return 'CLI 对话';
     if (id.startsWith('telegram_')) return 'Telegram 对话';
+    if (id.startsWith('feishu')) return '飞书对话';
     return id;
   }
   return summary;
 }
+
+// ── Channel grouping ──
+
+interface ChannelGroup {
+  key: string;
+  label: string;
+  icon: string;
+  sessions: Session[];
+}
+
+const CHANNEL_CONFIG: Record<string, { label: string; icon: string; order: number }> = {
+  webchat:  { label: '网页对话', icon: '🌐', order: 0 },
+  cli:      { label: '命令行',   icon: '💻', order: 1 },
+  feishu:   { label: '飞书',     icon: '💬', order: 2 },
+  telegram: { label: 'Telegram', icon: '✈️', order: 3 },
+  discord:  { label: 'Discord',  icon: '🎮', order: 4 },
+  test:     { label: '测试',     icon: '🧪', order: 5 },
+  other:    { label: '其他',     icon: '📁', order: 6 },
+};
+
+/** Extract channel from sessionKey (e.g. "feishu.lab:xxx" → "feishu") */
+function getChannel(sessionKey: string): string {
+  if (!sessionKey) return 'other';
+  const colonIdx = sessionKey.indexOf(':');
+  const prefix = colonIdx > 0 ? sessionKey.substring(0, colonIdx) : sessionKey;
+  // Normalize: "feishu.lab" → "feishu", "feishu.ST" → "feishu"
+  const dotIdx = prefix.indexOf('.');
+  const base = dotIdx > 0 ? prefix.substring(0, dotIdx) : prefix;
+  return CHANNEL_CONFIG[base] ? base : 'other';
+}
+
+/** Group sessions by channel, preserving sort order within each group */
+function groupSessionsByChannel(sessions: Session[]): ChannelGroup[] {
+  const groupMap = new Map<string, Session[]>();
+
+  for (const session of sessions) {
+    const channel = getChannel(session.sessionKey || '');
+    if (!groupMap.has(channel)) {
+      groupMap.set(channel, []);
+    }
+    groupMap.get(channel)!.push(session);
+  }
+
+  const groups: ChannelGroup[] = [];
+  for (const [key, groupSessions] of groupMap) {
+    const config = CHANNEL_CONFIG[key] || CHANNEL_CONFIG.other;
+    groups.push({
+      key,
+      label: config.label,
+      icon: config.icon,
+      sessions: groupSessions, // already sorted by lastActiveAt from backend
+    });
+  }
+
+  // Sort groups: webchat first, then by configured order
+  groups.sort((a, b) => {
+    const orderA = CHANNEL_CONFIG[a.key]?.order ?? 99;
+    const orderB = CHANNEL_CONFIG[b.key]?.order ?? 99;
+    return orderA - orderB;
+  });
+
+  return groups;
+}
+
+// ── Components ──
 
 function SessionItem({
   id, summary, filename, sessionKey, lastActiveAt,
@@ -146,8 +213,41 @@ function SessionItem({
   );
 }
 
+function ChannelGroupHeader({
+  icon,
+  label,
+  count,
+  collapsed,
+  onToggle,
+}: {
+  icon: string;
+  label: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className={styles.channelGroupHeader} onClick={onToggle}>
+      <span className={styles.channelGroupArrow}>{collapsed ? '▸' : '▾'}</span>
+      <span className={styles.channelGroupIcon}>{icon}</span>
+      <span className={styles.channelGroupLabel}>{label}</span>
+      <span className={styles.channelGroupCount}>{count}</span>
+    </div>
+  );
+}
+
 export default function SessionList() {
   const { sessions, activeSessionId, setActiveSession, loading, error, fetchSessions, renameSession, deleteSession } = useSessionStore();
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+
+  const groups = useMemo(() => groupSessionsByChannel(sessions), [sessions]);
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
 
   const handleRename = async (id: string, newName: string) => {
     await renameSession(id, newName);
@@ -182,22 +282,60 @@ export default function SessionList() {
     );
   }
 
+  // If only one group, don't show group headers (cleaner look)
+  if (groups.length === 1) {
+    return (
+      <div className={styles.sessionListContainer}>
+        {groups[0].sessions.map((session) => (
+          <SessionItem
+            key={session.id}
+            id={session.id}
+            summary={session.summary}
+            filename={session.filename || session.id + '.jsonl'}
+            sessionKey={session.sessionKey || ''}
+            lastActiveAt={session.lastActiveAt}
+            messageCount={session.messageCount}
+            isActive={session.id === activeSessionId}
+            onClick={() => setActiveSession(session.id)}
+            onRename={handleRename}
+            onDelete={handleDelete}
+          />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className={styles.sessionListContainer}>
-      {sessions.map((session) => (
-        <SessionItem
-          key={session.id}
-          id={session.id}
-          summary={session.summary}
-          filename={session.filename || session.id + '.jsonl'}
-          sessionKey={session.sessionKey || ''}
-          lastActiveAt={session.lastActiveAt}
-          messageCount={session.messageCount}
-          isActive={session.id === activeSessionId}
-          onClick={() => setActiveSession(session.id)}
-          onRename={handleRename}
-          onDelete={handleDelete}
-        />
+      {groups.map((group) => (
+        <div key={group.key} className={styles.channelGroup}>
+          <ChannelGroupHeader
+            icon={group.icon}
+            label={group.label}
+            count={group.sessions.length}
+            collapsed={!!collapsedGroups[group.key]}
+            onToggle={() => toggleGroup(group.key)}
+          />
+          {!collapsedGroups[group.key] && (
+            <div className={styles.channelGroupSessions}>
+              {group.sessions.map((session) => (
+                <SessionItem
+                  key={session.id}
+                  id={session.id}
+                  summary={session.summary}
+                  filename={session.filename || session.id + '.jsonl'}
+                  sessionKey={session.sessionKey || ''}
+                  lastActiveAt={session.lastActiveAt}
+                  messageCount={session.messageCount}
+                  isActive={session.id === activeSessionId}
+                  onClick={() => setActiveSession(session.id)}
+                  onRename={handleRename}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       ))}
     </div>
   );
