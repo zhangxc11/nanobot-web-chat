@@ -1179,6 +1179,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         logger.info(f"Send message to session {session_id} (key={session_key}): {message[:80]}..., images={len(images) if images else 0}")
 
         # Forward to worker's SSE streaming endpoint
+        sse_headers_sent = False
         try:
             worker_payload = {
                 'session_key': session_key,
@@ -1206,6 +1207,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
             self.send_header('Access-Control-Allow-Headers', 'Content-Type')
             self.end_headers()
+            sse_headers_sent = True
 
             # Stream worker's SSE response line by line
             with urllib.request.urlopen(req, timeout=330) as resp:
@@ -1215,10 +1217,16 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                     line = resp.readline()
                     if not line:
                         break
+                    # Skip SSE comment lines (keepalive) — don't forward to client
+                    # to avoid confusing the browser's SSE parser. Instead, we
+                    # use them purely to keep the urllib socket alive.
+                    decoded = line.decode('utf-8', errors='replace').rstrip('\n')
+                    if decoded.startswith(':'):
+                        continue
+
                     self.wfile.write(line)
 
                     # Parse SSE events to extract usage from 'done' event
-                    decoded = line.decode('utf-8', errors='replace').rstrip('\n')
                     if decoded.startswith('event: '):
                         current_event = decoded[7:].strip()
                     elif decoded.startswith('data: '):
@@ -1241,12 +1249,17 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
         except urllib.error.URLError as e:
             logger.error(f"Worker unavailable for session {session_id}: {e.reason}")
-            try:
-                self._send_json({
-                    'reply': f'❌ Worker 服务不可用: {str(e.reason)}'
-                }, 502)
-            except Exception:
-                pass
+            if not sse_headers_sent:
+                try:
+                    self._send_json({
+                        'reply': f'❌ Worker 服务不可用: {str(e.reason)}'
+                    }, 502)
+                except Exception:
+                    pass
+            else:
+                # SSE already started — send error as SSE event, then close
+                self._send_sse_error(f'Worker 服务不可用: {e.reason}')
+                self._try_recover_usage(session_key)
         except BrokenPipeError:
             logger.warning(f"Client disconnected during SSE stream for session {session_id}")
             # Client disconnected but task may still be running/completed.
@@ -1256,12 +1269,32 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             logger.error(f"SSE stream error for session {session_id}: {e}")
             # Also try to recover usage on other stream errors (e.g. timeout)
             self._try_recover_usage(session_key)
-            try:
-                self._send_json({
-                    'reply': f'❌ 转发失败: {str(e)}'
-                }, 500)
-            except Exception:
-                pass
+            if not sse_headers_sent:
+                try:
+                    self._send_json({
+                        'reply': f'❌ 转发失败: {str(e)}'
+                    }, 500)
+                except Exception:
+                    pass
+            else:
+                # SSE already started — send error as SSE event instead of
+                # polluting the stream with HTTP 500 + JSON (BUG_SSE_FREEZE #2)
+                self._send_sse_error(f'连接中断: {e}')
+
+
+    def _send_sse_error(self, message: str):
+        """Send an error as a proper SSE event (not HTTP 500 JSON).
+        
+        Use this when SSE headers have already been sent and we can't
+        switch to a JSON error response without polluting the stream.
+        """
+        try:
+            import json as _json
+            payload = f"event: error\ndata: {_json.dumps({'message': str(message)}, ensure_ascii=False)}\n\n"
+            self.wfile.write(payload.encode('utf-8'))
+            self.wfile.flush()
+        except Exception:
+            pass  # Client already gone
 
     def _try_recover_usage(self, session_key):
         """Try to recover usage data from worker when SSE stream was interrupted.

@@ -371,8 +371,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.warn(`SSE error for ${sessionId}: ${errorMsg}, attempting recovery...`);
 
-      // Check if this looks like a connection error (not a business error)
-      const isConnectionError = /fetch|network|abort|reset|refused/i.test(errorMsg);
+      // Check if this looks like a connection/transport error (not a business error)
+      const isConnectionError = /fetch|network|abort|reset|refused|timeout|timed|connection|running/i.test(errorMsg);
 
       if (isConnectionError) {
         set((s) => _updateTask(s, sessionId, { recovering: true, abortController: null }));
@@ -523,7 +523,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       window.dispatchEvent(new CustomEvent('usage-updated'));
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      const isConnectionError = /fetch|network|abort|reset|refused/i.test(errorMsg);
+      const isConnectionError = /fetch|network|abort|reset|refused|timeout|timed|connection|running/i.test(errorMsg);
       const currentTask = get().getTask(sessionId);
 
       if (isConnectionError && currentTask.sending) {
