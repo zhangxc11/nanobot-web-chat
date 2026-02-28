@@ -568,10 +568,22 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         with task['_sse_lock']:
             task['_sse_clients'].append(sse_writer)
 
-        # Block until task finishes or client disconnects
+        # Block until task finishes or client disconnects.
+        # Send SSE keepalive comments every ~15s to prevent upstream
+        # proxy/socket read timeouts (webserver urllib timeout=330s).
+        KEEPALIVE_INTERVAL = 15  # seconds
         try:
+            last_keepalive = time.time()
             while task['status'] == 'running':
                 time.sleep(0.5)
+                now = time.time()
+                if now - last_keepalive >= KEEPALIVE_INTERVAL:
+                    last_keepalive = now
+                    try:
+                        self.wfile.write(b': keepalive\n\n')
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        break  # Client disconnected
         except Exception:
             pass
         finally:
