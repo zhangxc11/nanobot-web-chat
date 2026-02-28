@@ -288,6 +288,39 @@ export async function fetchDailyUsage(days: number = 30): Promise<DailyUsage[]> 
   return data.days;
 }
 
+// ── Provider Management ──
+
+export interface ProviderInfo {
+  name: string;
+  model: string;
+}
+
+export interface ProviderState {
+  active: ProviderInfo;
+  available: ProviderInfo[];
+}
+
+export async function getProvider(): Promise<ProviderState> {
+  const res = await fetch(`${API_BASE}/provider`);
+  if (!res.ok) throw new Error(`Failed to get provider: ${res.status}`);
+  return res.json();
+}
+
+export async function setProvider(provider: string, model?: string): Promise<{ active: ProviderInfo }> {
+  const body: Record<string, string> = { provider };
+  if (model) body.model = model;
+  const res = await fetch(`${API_BASE}/provider`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // ── SSE Streaming ──
 
 export interface StreamCallbacks {

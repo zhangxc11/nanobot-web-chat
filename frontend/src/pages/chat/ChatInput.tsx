@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect, useState, type KeyboardEvent, type ChangeEvent, type DragEvent, type ClipboardEvent } from 'react';
 import { useMessageStore } from '@/store/messageStore';
 import { useSessionStore } from '@/store/sessionStore';
+import { useProviderStore } from '@/store/providerStore';
 import { uploadImage } from '@/services/api';
 import styles from './ChatInput.module.css';
 
@@ -20,6 +21,15 @@ export default function ChatInput() {
   const { activeSessionId } = useSessionStore();
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
+
+  // Provider state
+  const { active: activeProvider, available: availableProviders, fetchProvider, switchProvider } = useProviderStore();
+  const [providerOpen, setProviderOpen] = useState(false);
+
+  // Fetch provider info on mount
+  useEffect(() => {
+    fetchProvider();
+  }, [fetchProvider]);
 
   // Get task state for current session
   const task = activeSessionId ? getTask(activeSessionId) : null;
@@ -218,6 +228,28 @@ export default function ChatInput() {
     }
   }, [activeSessionId, cancelTask]);
 
+  // Close provider dropdown when clicking outside
+  useEffect(() => {
+    if (!providerOpen) return;
+    const handleClick = () => setProviderOpen(false);
+    // Delay to avoid closing on the same click that opened it
+    const timer = setTimeout(() => document.addEventListener('click', handleClick), 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handleClick);
+    };
+  }, [providerOpen]);
+
+  // Handle provider selection
+  const handleProviderSelect = useCallback(async (providerName: string, model: string) => {
+    try {
+      await switchProvider(providerName, model);
+      setProviderOpen(false);
+    } catch {
+      // Error is handled by the store
+    }
+  }, [switchProvider]);
+
   const disabled = !activeSessionId;
   const anyUploading = pendingImages.some(img => img.uploading);
 
@@ -236,6 +268,39 @@ export default function ChatInput() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* Provider selector */}
+      {activeProvider && (
+        <div className={styles.providerBar}>
+          <button
+            className={`${styles.providerButton} ${isCurrentSessionSending ? styles.providerDisabled : ''}`}
+            onClick={() => !isCurrentSessionSending && setProviderOpen(!providerOpen)}
+            disabled={isCurrentSessionSending}
+            title={isCurrentSessionSending ? '任务执行中，无法切换' : '切换 LLM Provider'}
+          >
+            <span className={styles.providerIcon}>🔌</span>
+            <span className={styles.providerName}>{activeProvider.name}</span>
+            <span className={styles.providerModel}>{activeProvider.model}</span>
+            {!isCurrentSessionSending && <span className={styles.providerArrow}>{providerOpen ? '▴' : '▾'}</span>}
+          </button>
+
+          {providerOpen && !isCurrentSessionSending && (
+            <div className={styles.providerDropdown}>
+              {availableProviders.map((p) => (
+                <button
+                  key={p.name}
+                  className={`${styles.providerOption} ${p.name === activeProvider.name ? styles.providerOptionActive : ''}`}
+                  onClick={() => handleProviderSelect(p.name, p.model)}
+                >
+                  <span className={styles.providerOptionName}>{p.name}</span>
+                  <span className={styles.providerOptionModel}>{p.model}</span>
+                  {p.name === activeProvider.name && <span className={styles.providerOptionCheck}>✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Image preview area */}
       {pendingImages.length > 0 && (
         <div className={styles.imagePreviewArea}>

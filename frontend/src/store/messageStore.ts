@@ -18,10 +18,11 @@ const EMPTY_TASK: SessionTask = {
 // ── Slash command definitions ──
 
 const HELP_TEXT = `🐈 nanobot commands:
-/new   — 开始新对话（创建新 session）
-/flush — 归档当前记忆并清空对话
-/stop  — 停止正在执行的任务
-/help  — 显示此帮助信息`;
+/new      — 开始新对话（创建新 session）
+/flush    — 归档当前记忆并清空对话
+/stop     — 停止正在执行的任务
+/provider — 查看/切换 LLM provider
+/help     — 显示此帮助信息`;
 
 /** Create a local system message (not persisted to JSONL) */
 function _makeSystemMsg(content: string): Message {
@@ -238,6 +239,66 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         }
 
         default: {
+          // Check for /provider (may have arguments, so can't use exact match)
+          if (cmd === '/provider' || cmd.startsWith('/provider')) {
+            // /provider command: query or switch provider
+            if (task.sending) {
+              set((s) => ({
+                messages: [...s.messages, _makeSystemMsg('⚠️ 任务执行中，无法切换 provider。')],
+              }));
+              return;
+            }
+
+            const parts = trimmed.split(/\s+/);
+            if (parts.length === 1) {
+              // /provider — show status
+              try {
+                const { useProviderStore } = await import('@/store/providerStore');
+                await useProviderStore.getState().fetchProvider();
+                const { active, available } = useProviderStore.getState();
+                if (!active) {
+                  set((s) => ({
+                    messages: [...s.messages, _makeSystemMsg('❌ 无法获取 provider 信息。')],
+                  }));
+                  return;
+                }
+                const lines = [`🔌 当前: **${active.name}** / \`${active.model}\``, '', '可用 providers:'];
+                for (const item of available) {
+                  const marker = item.name === active.name ? ' ← 当前' : '';
+                  lines.push(`  • **${item.name}** (\`${item.model}\`)${marker}`);
+                }
+                set((s) => ({
+                  messages: [...s.messages, _makeSystemMsg(lines.join('\n'))],
+                }));
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                set((s) => ({
+                  messages: [...s.messages, _makeSystemMsg(`❌ ${msg}`)],
+                }));
+              }
+            } else {
+              // /provider <name> [model] — switch
+              const providerName = parts[1];
+              const model = parts[2] || undefined;
+              try {
+                const { useProviderStore } = await import('@/store/providerStore');
+                await useProviderStore.getState().switchProvider(providerName, model);
+                const { active } = useProviderStore.getState();
+                set((s) => ({
+                  messages: [...s.messages, _makeSystemMsg(
+                    `✅ 已切换到 **${active?.name}** / \`${active?.model}\``
+                  )],
+                }));
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                set((s) => ({
+                  messages: [...s.messages, _makeSystemMsg(`❌ ${msg}`)],
+                }));
+              }
+            }
+            return;
+          }
+
           // Unknown slash command
           set((s) => ({
             messages: [...s.messages, _makeSystemMsg(

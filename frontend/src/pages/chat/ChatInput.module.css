@@ -189,3 +189,108 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── Provider selector ── */
+
+.providerBar {
+  position: relative;
+  max-width: 800px;
+  margin: 0 auto 6px;
+}
+
+.providerButton {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.providerButton:hover:not(:disabled) {
+  background: var(--bg-primary);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.providerButton.providerDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.providerIcon {
+  font-size: 13px;
+}
+
+.providerName {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.providerModel {
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+}
+
+.providerArrow {
+  font-size: 10px;
+  margin-left: 2px;
+}
+
+.providerDropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  min-width: 240px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.providerOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.providerOption:hover {
+  background: var(--bg-secondary);
+}
+
+.providerOption.providerOptionActive {
+  background: rgba(52, 152, 219, 0.1);
+}
+
+.providerOptionName {
+  font-weight: 600;
+}
+
+.providerOptionModel {
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  flex: 1;
+}
+
+.providerOptionCheck {
+  color: var(--accent);
+  font-weight: bold;
+}

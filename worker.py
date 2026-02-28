@@ -74,6 +74,41 @@ def _start_async_loop():
         time.sleep(0.01)
 
 
+# ── ProviderPool singleton — runtime-switchable provider state ──
+# The pool holds all configured providers and tracks the active one.
+# Each task reads the pool's active state at creation time.
+
+_provider_pool = None  # ProviderPool instance
+_pool_lock = threading.Lock()
+
+
+def _build_pool():
+    """Build a ProviderPool from nanobot config (called once at startup)."""
+    from nanobot.config.loader import load_config
+    from nanobot.cli.commands import _make_provider
+    config = load_config()
+    pool = _make_provider(config)
+    logger.info(f"ProviderPool built: active={pool.active_provider}/{pool.active_model}, "
+                f"available={[p['name'] for p in pool.available]}")
+    return pool
+
+
+def _get_pool():
+    """Get or create the module-level ProviderPool singleton."""
+    global _provider_pool
+    if _provider_pool is None:
+        with _pool_lock:
+            if _provider_pool is None:
+                _provider_pool = _build_pool()
+    return _provider_pool
+
+
+def _has_running_tasks() -> bool:
+    """Check if any tasks are currently running."""
+    with _tasks_lock:
+        return any(t['status'] == 'running' for t in _tasks.values())
+
+
 # ── AgentRunner factory — one runner per task for concurrency safety ──
 # Each concurrent task gets its own AgentRunner with independent tool context,
 # so that _set_tool_context() in one task doesn't clobber another.
@@ -82,12 +117,60 @@ def _start_async_loop():
 def _create_runner():
     """Create a fresh AgentRunner instance for a task.
     
-    Unlike the previous singleton approach, each task gets its own runner
-    to avoid tool context conflicts during concurrent execution.
+    Reads the ProviderPool's current active provider/model state
+    and builds a runner configured for that provider.
+    Each task gets its own runner for concurrency safety.
     """
     from nanobot.sdk import AgentRunner
-    runner = AgentRunner.from_config()
-    logger.info("AgentRunner created for task")
+    from nanobot.config.loader import load_config, get_data_dir
+    from nanobot.bus.queue import MessageBus
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.session.manager import SessionManager
+    from nanobot.cron.service import CronService
+    from nanobot.usage.recorder import UsageRecorder
+    from nanobot.usage.detail_logger import LLMDetailLogger
+    from nanobot.audit.logger import AuditLogger
+    from nanobot.providers.pool import ProviderPool
+
+    pool = _get_pool()
+    config = load_config()
+    data_dir = get_data_dir()
+
+    # Create a snapshot of the pool for this task:
+    # The runner gets the full pool (so /provider command works within the task),
+    # but the active state is read at task creation time.
+    provider = pool
+
+    bus = MessageBus()
+    session_manager = SessionManager(config.workspace_path)
+    cron = CronService(data_dir / "cron")
+    usage_recorder = UsageRecorder()
+    detail_logger = LLMDetailLogger()
+    audit_logger = AuditLogger()
+
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=pool.active_model,
+        temperature=config.agents.defaults.temperature,
+        max_tokens=config.agents.defaults.max_tokens,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
+        brave_api_key=config.tools.web.search.api_key or None,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+        usage_recorder=usage_recorder,
+        detail_logger=detail_logger,
+        audit_logger=audit_logger,
+    )
+
+    runner = AgentRunner(agent_loop)
+    logger.info(f"AgentRunner created for task (provider={pool.active_provider}, model={pool.active_model})")
     return runner
 
 
@@ -329,18 +412,31 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._send_json({'error': 'Not found'}, 404)
 
+    def do_PUT(self):
+        path = self.path.rstrip('/')
+        if path == '/provider':
+            self._handle_set_provider()
+        else:
+            self._send_json({'error': 'Not found'}, 404)
+
     def do_GET(self):
         path = self.path.rstrip('/')
         if path == '/health':
             # Count running tasks
             with _tasks_lock:
                 running_count = sum(1 for t in _tasks.values() if t['status'] == 'running')
+            pool = _get_pool()
             self._send_json({
                 'status': 'ok',
                 'service': 'worker',
                 'mode': 'sdk-concurrent',
                 'running_tasks': running_count,
+                'active_provider': pool.active_provider,
+                'active_model': pool.active_model,
             })
+            return
+        if path == '/provider':
+            self._handle_get_provider()
             return
         if path.startswith('/tasks/'):
             session_key = path[7:]
@@ -551,6 +647,56 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
 
         self._send_json({'status': 'injected', 'message': 'Message queued for injection'})
 
+    # ── Provider management ──
+
+    def _handle_get_provider(self):
+        """GET /provider — query current active provider and available list."""
+        pool = _get_pool()
+        self._send_json({
+            'active': {
+                'name': pool.active_provider,
+                'model': pool.active_model,
+            },
+            'available': pool.available,
+        })
+
+    def _handle_set_provider(self):
+        """PUT /provider — switch active provider. Rejected if tasks are running."""
+        # Check for running tasks
+        if _has_running_tasks():
+            self._send_json({
+                'error': 'Task running, cannot switch provider',
+            }, 409)
+            return
+
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            self._send_json({'error': 'Invalid JSON'}, 400)
+            return
+
+        provider_name = data.get('provider', '').strip()
+        model = data.get('model', '').strip() or None
+
+        if not provider_name:
+            self._send_json({'error': 'Missing provider name'}, 400)
+            return
+
+        pool = _get_pool()
+        try:
+            pool.switch(provider_name, model)
+            logger.info(f"Provider switched: {pool.active_provider}/{pool.active_model}")
+            self._send_json({
+                'active': {
+                    'name': pool.active_provider,
+                    'model': pool.active_model,
+                },
+            })
+        except ValueError as e:
+            self._send_json({'error': str(e)}, 400)
+
     # ── Task status query ──
 
     def _handle_get_task(self, session_key):
@@ -618,12 +764,10 @@ if __name__ == '__main__':
 
     # Verify config is loadable (fail fast on misconfiguration)
     try:
-        runner = _create_runner()
-        # Close immediately — just testing config + provider init
-        asyncio.run_coroutine_threadsafe(runner.close(), _async_loop).result(timeout=10)
-        logger.info("Config verified: AgentRunner creation successful")
+        pool = _get_pool()
+        logger.info(f"Config verified: ProviderPool active={pool.active_provider}/{pool.active_model}")
     except Exception as e:
-        logger.error(f"Failed to create AgentRunner: {e}", exc_info=True)
+        logger.error(f"Failed to build ProviderPool: {e}", exc_info=True)
         sys.exit(1)
 
     class ThreadedWorkerServer(socketserver.ThreadingMixIn, http.server.HTTPServer):

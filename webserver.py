@@ -193,6 +193,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_daily_usage(params)
             return
 
+        if path == '/api/provider':
+            self._handle_proxy_provider_get()
+            return
+
         if path.startswith('/api/uploads/'):
             self._handle_serve_upload(path)
             return
@@ -254,6 +258,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
         if path == '/api/config':
             self._handle_put_config()
+            return
+
+        if path == '/api/provider':
+            self._handle_proxy_provider_put()
             return
 
         self._send_json({'error': 'Not found'}, 404)
@@ -1105,6 +1113,53 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Inject error: {e}")
             self._send_json({'status': 'error', 'message': str(e)}, 500)
+
+    # ── Provider proxy ──
+
+    def _handle_proxy_provider_get(self):
+        """GET /api/provider — forward to worker GET /provider."""
+        try:
+            req = urllib.request.Request(
+                f'{WORKER_URL}/provider',
+                method='GET',
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            self._send_json(data)
+        except urllib.error.URLError as e:
+            logger.error(f"Worker unavailable for provider query: {e}")
+            self._send_json({'error': 'Worker unavailable'}, 502)
+        except Exception as e:
+            logger.error(f"Provider query error: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_proxy_provider_put(self):
+        """PUT /api/provider — forward to worker PUT /provider."""
+        data = self._read_body()
+        try:
+            body = json.dumps(data).encode('utf-8')
+            req = urllib.request.Request(
+                f'{WORKER_URL}/provider',
+                data=body,
+                headers={'Content-Type': 'application/json'},
+                method='PUT',
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                result = json.loads(resp.read().decode('utf-8'))
+            self._send_json(result)
+        except urllib.error.HTTPError as e:
+            resp_body = e.read().decode('utf-8', errors='replace')
+            try:
+                result = json.loads(resp_body)
+            except Exception:
+                result = {'error': resp_body}
+            self._send_json(result, e.code)
+        except urllib.error.URLError as e:
+            logger.error(f"Worker unavailable for provider switch: {e}")
+            self._send_json({'error': 'Worker unavailable'}, 502)
+        except Exception as e:
+            logger.error(f"Provider switch error: {e}")
+            self._send_json({'error': str(e)}, 500)
 
     def _handle_send_message(self, session_id):
         """POST /api/sessions/:id/messages — forward to Worker as SSE stream."""
