@@ -1588,4 +1588,59 @@ if (trimmed.startsWith('/')) {
 
 （当前无待处理 backlog）
 
-*本文档将随需求迭代持续更新。*
+---
+
+## 三十一、运行时 Provider 动态切换 (v4.3)
+
+> 2026-03-01 运行时 Provider 切换，前后端联动
+> 依赖：nanobot 核心 Phase 16 ProviderPool（已完成，详见 [`nanobot/docs/REQUIREMENTS.md §十五`](/Users/zhangxingcheng/Documents/code/workspace/nanobot/docs/REQUIREMENTS.md)）
+> 详细设计：[`PROVIDER_POOL_DESIGN.md`](PROVIDER_POOL_DESIGN.md)
+
+### Issue #43：Web Chat 支持运行时 Provider 动态切换
+
+**需求背景**：
+- Agent token 消耗量大，需要根据任务难度切换不同 API 源控制成本
+- nanobot 核心已实现 `ProviderPool` 类（commit `e31c837`），支持运行时切换 active provider + model
+- Web Chat 需要在 Worker/Webserver/前端三层集成此功能
+
+**功能描述**：
+1. **Worker**：维护模块级 ProviderPool 单例，提供 `GET/PUT /provider` API 端点
+2. **Webserver**：转发 `/api/provider` 请求到 Worker
+3. **前端 `/provider` 斜杠命令**：查询当前状态或切换 provider
+4. **前端 Provider 选择器 UI**：ChatInput 上方的 provider + model 选择器
+5. **任务执行中保护**：前端 UI disabled + 斜杠命令提示 + Worker API 返回 409
+
+**交互设计**：
+
+Provider 选择器（ChatInput 上方）：
+```
+┌─────────────────────────────────────┐
+│  🔌 anthropic / claude-opus-4-6  ▾ │  ← 点击展开下拉选择
+├─────────────────────────────────────┤
+│  [消息输入框]              [发送]    │
+└─────────────────────────────────────┘
+```
+
+`/provider` 命令：
+| 用法 | 效果 |
+|------|------|
+| `/provider` | 显示当前 active + 可用列表（system-local 消息） |
+| `/provider <name> [model]` | 切换 provider（任务中拒绝） |
+
+**后端 API**：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/provider` | 查询当前 active + available（转发到 Worker） |
+| PUT | `/api/provider` | 切换 provider（转发到 Worker，任务中返回 409） |
+
+**改动范围**：
+| 文件 | 改动 |
+|------|------|
+| `worker.py` | 模块级 ProviderPool 单例 + GET/PUT /provider + _create_runner 改造 |
+| `webserver.py` | 转发 GET/PUT /api/provider |
+| `frontend/src/services/api.ts` | getProvider() / setProvider() |
+| `frontend/src/store/providerStore.ts` | 新建 provider 状态管理 |
+| `frontend/src/store/messageStore.ts` | /provider 斜杠命令 + /help 更新 |
+| `frontend/src/pages/chat/ChatInput.tsx` | Provider 选择器 UI |
+| `frontend/src/pages/chat/ChatInput.module.css` | 选择器样式 |

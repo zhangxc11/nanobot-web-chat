@@ -1446,4 +1446,102 @@ Web UI 的斜杠命令分为两层处理：
 
 ---
 
+## 十六、Provider 动态切换 (v4.3)
+
+> 依赖：nanobot 核心 ProviderPool（[`nanobot/docs/ARCHITECTURE.md §七`](/Users/zhangxingcheng/Documents/code/workspace/nanobot/docs/ARCHITECTURE.md)）
+
+### 16.1 架构概览
+
+```
+前端 Provider 选择器 / /provider 命令
+  │
+  ▼
+webserver.py (:8081)
+  GET/PUT /api/provider → 转发
+  │
+  ▼
+worker.py (:8082)
+  GET/PUT /provider → 操作 ProviderPool 单例
+  │
+  ▼
+ProviderPool (模块级单例)
+  ├── active_provider / active_model → 运行时状态
+  └── providers: { name → (LLMProvider, default_model) }
+```
+
+### 16.2 Worker ProviderPool 单例
+
+Worker 维护模块级 ProviderPool 单例，所有任务共享同一个 Pool 的 active 状态：
+
+```python
+_provider_pool = None  # 模块级单例
+_pool_lock = threading.Lock()
+
+def _get_pool():
+    """获取或创建 ProviderPool 单例。"""
+    # 使用 nanobot 核心的 _make_provider(config) 构建
+    ...
+
+def _create_runner():
+    """创建 AgentRunner，将 Pool 作为 provider 传入。"""
+    pool = _get_pool()
+    # AgentLoop 接收 pool 作为 provider，无感知切换
+    agent_loop = AgentLoop(provider=pool, model=pool.active_model, ...)
+    return AgentRunner(agent_loop)
+```
+
+### 16.3 Worker API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/provider` | 返回 `{ active: {provider, model}, available: [{name, model}] }` |
+| PUT | `/provider` | 切换 `{ provider, model? }`。任务执行中返回 409 |
+
+PUT 的保护逻辑：
+```python
+def _handle_set_provider(self):
+    if _has_running_tasks():
+        return 409, {"error": "Task running, cannot switch provider"}
+    pool.switch(provider_name, model)
+    return 200, {"active": {"provider": ..., "model": ...}}
+```
+
+### 16.4 Webserver 转发
+
+| 前端路径 | Worker 路径 | 方法 |
+|---------|------------|------|
+| `/api/provider` | `/provider` | GET |
+| `/api/provider` | `/provider` | PUT |
+
+### 16.5 前端组件架构
+
+```
+ChatInput
+  ├── ProviderSelector (新增)
+  │   ├── ProviderButton (显示当前 active)
+  │   └── ProviderDropdown (展开可选列表)
+  └── InputWrapper (现有)
+      ├── TextArea
+      └── SendButton
+
+store/providerStore.ts (新增)
+  ├── active: { provider, model }
+  ├── available: [{ name, model }]
+  ├── fetchProvider()
+  └── switchProvider(name, model?)
+```
+
+### 16.6 /provider 斜杠命令
+
+前端本地拦截（不发送到后端），通过 API 调用 Worker：
+
+```
+/provider        → GET /api/provider → 显示 system-local 消息
+/provider <name> → PUT /api/provider → 切换 + 显示结果
+```
+
+任务执行中：本地提示 "⚠️ 任务执行中，无法切换 provider"。
+
+---
+
 *本文档将随开发进展持续更新。*
