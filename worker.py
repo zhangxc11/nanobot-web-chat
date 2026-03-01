@@ -357,13 +357,19 @@ def _run_task_sdk(session_key: str, message: str, images: list[str] | None = Non
 def _notify_sse(task, event: str, data: dict):
     """Notify all SSE clients of an event (thread-safe)."""
     with task['_sse_lock']:
+        client_count = len(task['_sse_clients'])
+        if event in ('done', 'error'):
+            logger.debug(f"_notify_sse: sending '{event}' to {client_count} SSE client(s)")
         alive = []
-        for sse_fn in task['_sse_clients']:
+        for i, sse_fn in enumerate(task['_sse_clients']):
             try:
                 sse_fn(event, data)
                 alive.append(sse_fn)
-            except Exception:
-                pass  # Client disconnected
+                if event in ('done', 'error'):
+                    logger.debug(f"_notify_sse: client {i} accepted '{event}'")
+            except Exception as e:
+                if event in ('done', 'error'):
+                    logger.warning(f"_notify_sse: client {i} failed for '{event}': {e}")
         task['_sse_clients'] = alive
 
 
@@ -588,6 +594,8 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                     except (BrokenPipeError, ConnectionResetError):
                         break  # Client disconnected
 
+            logger.debug(f"SSE wait loop exited: task status={task['status']}, waiting for done_sent...")
+
             # Task finished — wait for _notify_sse to send done/error event
             # via sse_writer callback (runs in asyncio thread's finally block).
             # The race: task['status'] changes BEFORE _notify_sse is called,
@@ -595,9 +603,12 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             # Wait up to 2s for the done event to arrive.
             done_sent.wait(timeout=2.0)
 
+            logger.debug(f"done_sent.wait returned: is_set={done_sent.is_set()}")
+
             # Safety net: send done/error ourselves if _notify_sse didn't
             # (e.g. due to timing or sse_writer already removed).
             if not done_sent.is_set():
+                logger.debug("Safety net: sending done/error ourselves")
                 try:
                     with task['_sse_lock']:
                         if task['status'] == 'done':
@@ -607,12 +618,14 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                             sse_writer('done', done_payload)
                         elif task['status'] == 'error':
                             sse_writer('error', {'message': task.get('error', 'Unknown error')})
-                except (BrokenPipeError, ConnectionResetError, OSError):
-                    pass  # Client disconnected
+                    logger.debug(f"Safety net: done_sent is now {done_sent.is_set()}")
+                except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                    logger.debug(f"Safety net: write failed: {e}")
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"_attach_to_existing_task: unexpected exception: {e}")
         finally:
+            logger.debug(f"_attach_to_existing_task: cleaning up, done_sent={done_sent.is_set()}")
             disconnected.set()
             with task['_sse_lock']:
                 if sse_writer in task['_sse_clients']:
@@ -789,12 +802,15 @@ if __name__ == '__main__':
             sys.exit(0)
         sys.stdin = open(os.devnull, 'r')
         sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
+        stderr_log = LOG_FILE.replace('.log', '-stderr.log')
+        sys.stderr = open(stderr_log, 'a')
         devnull_fd = os.open(os.devnull, os.O_RDWR)
         os.dup2(devnull_fd, 0)
         os.dup2(devnull_fd, 1)
-        os.dup2(devnull_fd, 2)
         os.close(devnull_fd)
+        stderr_fd = os.open(stderr_log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        os.dup2(stderr_fd, 2)
+        os.close(stderr_fd)
 
     # Start async event loop
     _start_async_loop()

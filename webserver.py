@@ -1241,9 +1241,16 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                                     self._try_record_usage(usage)
                             except Exception as e:
                                 logger.error(f"Failed to process done event: {e}")
+                        self.wfile.flush()
+                        # After forwarding done/error event, stop reading —
+                        # don't wait for worker to close the connection.
+                        if current_event in ('done', 'error'):
+                            logger.debug(f"Received terminal SSE event '{current_event}' for session {session_id}, closing stream")
+                            current_event = ''
+                            current_data = ''
+                            break
                         current_event = ''
                         current_data = ''
-                        self.wfile.flush()
 
             logger.info(f"SSE stream completed for session {session_id}")
 
@@ -1530,16 +1537,19 @@ if __name__ == '__main__':
         pid2 = os.fork()
         if pid2 > 0:
             sys.exit(0)
-        # Grandchild: redirect stdio to /dev/null
+        # Grandchild: redirect stdio — stderr to log file for crash diagnostics
         sys.stdin = open(os.devnull, 'r')
         sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
+        stderr_log = LOG_FILE.replace('.log', '-stderr.log')
+        sys.stderr = open(stderr_log, 'a')
         # Redirect low-level fds too
         devnull_fd = os.open(os.devnull, os.O_RDWR)
         os.dup2(devnull_fd, 0)
         os.dup2(devnull_fd, 1)
-        os.dup2(devnull_fd, 2)
         os.close(devnull_fd)
+        stderr_fd = os.open(stderr_log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        os.dup2(stderr_fd, 2)
+        os.close(stderr_fd)
 
     class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         daemon_threads = True
