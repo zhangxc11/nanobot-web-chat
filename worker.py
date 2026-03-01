@@ -557,6 +557,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
 
         # Task still running — register as SSE client
         disconnected = threading.Event()
+        done_sent = threading.Event()  # Track if done/error event was sent
 
         def sse_writer(event, data):
             if disconnected.is_set():
@@ -564,6 +565,8 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
             self.wfile.write(payload.encode('utf-8'))
             self.wfile.flush()
+            if event in ('done', 'error'):
+                done_sent.set()
 
         with task['_sse_lock']:
             task['_sse_clients'].append(sse_writer)
@@ -584,6 +587,29 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                         self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError):
                         break  # Client disconnected
+
+            # Task finished — wait for _notify_sse to send done/error event
+            # via sse_writer callback (runs in asyncio thread's finally block).
+            # The race: task['status'] changes BEFORE _notify_sse is called,
+            # so our while-loop exits before the done event is sent.
+            # Wait up to 2s for the done event to arrive.
+            done_sent.wait(timeout=2.0)
+
+            # Safety net: send done/error ourselves if _notify_sse didn't
+            # (e.g. due to timing or sse_writer already removed).
+            if not done_sent.is_set():
+                try:
+                    with task['_sse_lock']:
+                        if task['status'] == 'done':
+                            done_payload = {'success': True}
+                            if task.get('usage'):
+                                done_payload['usage'] = task['usage']
+                            sse_writer('done', done_payload)
+                        elif task['status'] == 'error':
+                            sse_writer('error', {'message': task.get('error', 'Unknown error')})
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass  # Client disconnected
+
         except Exception:
             pass
         finally:
