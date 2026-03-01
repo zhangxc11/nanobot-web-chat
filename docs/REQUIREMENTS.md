@@ -1582,14 +1582,6 @@ if (trimmed.startsWith('/')) {
 
 ---
 
-### 手动维护的 backlog
-
-**note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
-
-（当前无待处理 backlog）
-
----
-
 ## 三十一、运行时 Provider 动态切换 (v4.3)
 
 > 2026-03-01 运行时 Provider 切换，前后端联动
@@ -1644,3 +1636,11 @@ Provider 选择器（ChatInput 上方）：
 | `frontend/src/store/messageStore.ts` | /provider 斜杠命令 + /help 更新 |
 | `frontend/src/pages/chat/ChatInput.tsx` | Provider 选择器 UI |
 | `frontend/src/pages/chat/ChatInput.module.css` | 选择器样式 |
+
+---
+
+### 手动维护的 backlog
+
+**note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
+
+（当前无待处理 backlog）
