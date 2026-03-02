@@ -103,6 +103,11 @@ def strip_runtime_context(content):
 class WebServerHandler(http.server.BaseHTTPRequestHandler):
     """REST API handler for nanobot Web Chat Server."""
 
+    # Use HTTP/1.1 for keep-alive and connection reuse.
+    # This prevents browser connection pool exhaustion when multiple tabs
+    # are open (browsers limit concurrent connections per origin to ~6).
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, format, *args):
         # Redirect http.server default logging to our logger
         if args:
@@ -1198,10 +1203,12 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             )
 
             # SSE response headers
+            # Use Connection: close so this long-lived stream doesn't hold a
+            # keep-alive slot in the browser's per-origin connection pool.
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
             self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Connection', 'keep-alive')
+            self.send_header('Connection', 'close')
             self.send_header('X-Accel-Buffering', 'no')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
