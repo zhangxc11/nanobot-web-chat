@@ -314,6 +314,34 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
     }
   }
 
+  // Step 1b: Fallback — if no final reply found, check for `message` tool calls.
+  // When the agent uses the `message` tool as its final output, the subsequent
+  // assistant message has content=null (suppressed by the loop). Extract the
+  // content from the *last* `message` tool call's arguments so it still renders.
+  let messageToolContent: string | null = null;
+  let messageToolTimestamp: string | null = null;
+  if (!finalReplyMsg) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'assistant' && msg.toolCalls) {
+        for (let j = msg.toolCalls.length - 1; j >= 0; j--) {
+          const tc = msg.toolCalls[j];
+          if (tc.name === 'message') {
+            try {
+              const args = JSON.parse(tc.arguments || '{}');
+              if (args.content && typeof args.content === 'string') {
+                messageToolContent = args.content;
+                messageToolTimestamp = msg.timestamp || null;
+              }
+            } catch { /* ignore parse errors */ }
+            break;
+          }
+        }
+        if (messageToolContent) break;
+      }
+    }
+  }
+
   // Step 2: Build process items (preceding texts + tool calls) in message order
   const processItems: ProcessItem[] = [];
   const matchedToolIds = new Set<string>();
@@ -392,8 +420,11 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
     ? (finalReplyIsError ? getErrorText(finalReplyMsg.content) : getTextContent(finalReplyMsg.content))
     : '';
 
+  // Determine effective final content (real reply or message-tool fallback)
+  const hasEffectiveFinalReply = finalReplyMsg || messageToolContent;
+
   // If nothing to render, skip
-  if (processItems.length === 0 && !finalReplyMsg) return null;
+  if (processItems.length === 0 && !hasEffectiveFinalReply) return null;
 
   // Find last timestamp in the turn
   const lastTimestamp = [...messages].reverse().find(m => m.timestamp)?.timestamp || '';
@@ -411,9 +442,14 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
               <MarkdownRenderer content={finalReplyText} />
             </div>
           )}
+          {!finalReplyMsg && messageToolContent && (
+            <div className={styles.turnTextSegment}>
+              <MarkdownRenderer content={messageToolContent} />
+            </div>
+          )}
         </div>
-        {lastTimestamp && (
-          <div className={styles.timestamp}>{formatTimestamp(lastTimestamp)}</div>
+        {(lastTimestamp || messageToolTimestamp) && (
+          <div className={styles.timestamp}>{formatTimestamp(lastTimestamp || messageToolTimestamp || '')}</div>
         )}
       </div>
     </div>

@@ -19,13 +19,23 @@ done
 
 WORKER_URL="http://127.0.0.1:${WORKER_PORT}"
 
+# Use nanobot's venv python (requires 3.10+)
+# Auto-detect from `which nanobot` if NANOBOT_PYTHON is not set
+if [ -z "$NANOBOT_PYTHON" ]; then
+    NANOBOT_BIN=$(which nanobot 2>/dev/null)
+    if [ -n "$NANOBOT_BIN" ]; then
+        NANOBOT_PYTHON="$(dirname "$NANOBOT_BIN")/python3"
+    fi
+fi
+PYTHON="${NANOBOT_PYTHON:-python3}"
+
 echo "🚀 Starting nanobot Web Chat..."
 echo "   Webserver: http://127.0.0.1:${WEBSERVER_PORT}"
 echo "   Worker:    ${WORKER_URL}"
 echo ""
 
 # Start worker in background
-python3 "${SCRIPT_DIR}/worker.py" --port "${WORKER_PORT}" &
+$PYTHON "${SCRIPT_DIR}/worker.py" --port "${WORKER_PORT}" &
 WORKER_PID=$!
 echo "   Worker PID: ${WORKER_PID}"
 
@@ -33,7 +43,7 @@ echo "   Worker PID: ${WORKER_PID}"
 sleep 0.5
 
 # Start webserver in foreground
-python3 "${SCRIPT_DIR}/webserver.py" --port "${WEBSERVER_PORT}" --worker-url "${WORKER_URL}" &
+$PYTHON "${SCRIPT_DIR}/webserver.py" --port "${WEBSERVER_PORT}" --worker-url "${WORKER_URL}" &
 WEBSERVER_PID=$!
 echo "   Webserver PID: ${WEBSERVER_PID}"
 

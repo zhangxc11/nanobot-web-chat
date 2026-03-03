@@ -18,7 +18,14 @@ WORKER_PORT="${WORKER_PORT:-8082}"
 WORKER_URL="http://127.0.0.1:${WORKER_PORT}"
 
 # Use nanobot's venv python (requires 3.10+)
-PYTHON="${NANOBOT_PYTHON:-/Users/zhangxingcheng/Documents/code/workspace/nanobot/venv311/bin/python3}"
+# Auto-detect from `which nanobot` if NANOBOT_PYTHON is not set
+if [ -z "$NANOBOT_PYTHON" ]; then
+    NANOBOT_BIN=$(which nanobot 2>/dev/null)
+    if [ -n "$NANOBOT_BIN" ]; then
+        NANOBOT_PYTHON="$(dirname "$NANOBOT_BIN")/python3"
+    fi
+fi
+PYTHON="${NANOBOT_PYTHON:-python3}"
 
 stop_webserver() {
     local pids
