@@ -563,3 +563,19 @@
   max-width: 80%;
   border: 1px solid var(--border);
 }
+
+/* ── Error message styling ── */
+
+.errorBubble {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.errorIcon {
+  font-size: 14px;
+  margin-right: 2px;
+}
+
+.errorText {
+  color: var(--text-primary);
+}

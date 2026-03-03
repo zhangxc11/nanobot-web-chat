@@ -15,6 +15,23 @@ export interface UsageRecord {
   finished_at: string;
 }
 
+/** Prefix used by the backend for LLM error responses stored in JSONL */
+const LLM_ERROR_PREFIX = 'Error calling LLM:';
+
+/** Check if a message is an LLM error response */
+function isErrorMessage(content: string | ContentBlock[]): boolean {
+  const text = typeof content === 'string' ? content : getTextContent(content);
+  return text.startsWith(LLM_ERROR_PREFIX);
+}
+
+/** Strip the error prefix to get the user-facing error text */
+function getErrorText(content: string | ContentBlock[]): string {
+  const text = typeof content === 'string' ? content : getTextContent(content);
+  return text.startsWith(LLM_ERROR_PREFIX)
+    ? text.slice(LLM_ERROR_PREFIX.length).trim()
+    : text;
+}
+
 /** Extract text content from a message (handles both string and multimodal array) */
 function getTextContent(content: string | ContentBlock[]): string {
   if (typeof content === 'string') return content;
@@ -210,10 +227,12 @@ export default function MessageItem({ message }: MessageItemProps) {
   const isUser = role === 'user';
   const textContent = getTextContent(content);
   const imageUrls = isUser ? getImageUrls(content) : [];
+  const isError = !isUser && isErrorMessage(content);
+  const displayContent = isError ? getErrorText(content) : textContent;
 
   return (
     <div className={`${styles.message} ${isUser ? styles.userMessage : styles.assistantMessage}`}>
-      <div className={styles.bubble}>
+      <div className={`${styles.bubble} ${isError ? styles.errorBubble : ''}`}>
         {imageUrls.length > 0 && (
           <div className={styles.messageImages}>
             {imageUrls.map((url, i) => (
@@ -224,7 +243,8 @@ export default function MessageItem({ message }: MessageItemProps) {
           </div>
         )}
         <div className={styles.content}>
-          {isUser ? textContent : <MarkdownRenderer content={textContent} />}
+          {isError && <span className={styles.errorIcon}>❌ </span>}
+          {isUser ? displayContent : <MarkdownRenderer content={displayContent} />}
         </div>
         {timestamp && (
           <div className={styles.timestamp}>{formatTimestamp(timestamp)}</div>
@@ -366,6 +386,12 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
     }
   }
 
+  // Detect if the final reply is an error message
+  const finalReplyIsError = finalReplyMsg ? isErrorMessage(finalReplyMsg.content) : false;
+  const finalReplyText = finalReplyMsg
+    ? (finalReplyIsError ? getErrorText(finalReplyMsg.content) : getTextContent(finalReplyMsg.content))
+    : '';
+
   // If nothing to render, skip
   if (processItems.length === 0 && !finalReplyMsg) return null;
 
@@ -374,14 +400,15 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
 
   return (
     <div className={`${styles.message} ${styles.assistantMessage}`}>
-      <div className={styles.bubble}>
+      <div className={`${styles.bubble} ${finalReplyIsError && processItems.length === 0 ? styles.errorBubble : ''}`}>
         <div className={styles.turnContent}>
           {processItems.length > 0 && (
             <ToolProcessCollapsible items={processItems} toolCount={toolCount} usageRecords={matchedUsage} />
           )}
           {finalReplyMsg && (
-            <div className={styles.turnTextSegment}>
-              <MarkdownRenderer content={getTextContent(finalReplyMsg.content)} />
+            <div className={`${styles.turnTextSegment} ${finalReplyIsError ? styles.errorText : ''}`}>
+              {finalReplyIsError && <span className={styles.errorIcon}>❌ </span>}
+              <MarkdownRenderer content={finalReplyText} />
             </div>
           )}
         </div>
