@@ -1585,7 +1585,7 @@ if (trimmed.startsWith('/')) {
 ## 三十一、运行时 Provider 动态切换 (v4.3)
 
 > 2026-03-01 运行时 Provider 切换，前后端联动
-> 依赖：nanobot 核心 Phase 16 ProviderPool（已完成，详见 [`nanobot/docs/REQUIREMENTS.md §十五`](/Users/zhangxingcheng/Documents/code/workspace/nanobot/docs/REQUIREMENTS.md)）
+> 依赖：nanobot 核心 Phase 16 ProviderPool（已完成，详见 nanobot 核心仓库 `docs/REQUIREMENTS.md §十五`）
 > 详细设计：[`PROVIDER_POOL_DESIGN.md`](PROVIDER_POOL_DESIGN.md)
 
 ### Issue #43：Web Chat 支持运行时 Provider 动态切换

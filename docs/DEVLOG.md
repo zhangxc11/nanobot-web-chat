@@ -172,7 +172,7 @@
 ### 修复任务
 
 - ✅ **T7.1** 修复 nanobot 核心 `loop.py`：`_run_agent_loop` 的 `else` 分支追加 assistant 消息到 messages
-  - 修改文件：`/Users/zhangxingcheng/Documents/code/workspace/nanobot/nanobot/agent/loop.py`
+  - 修改文件：nanobot 核心仓库 `nanobot/agent/loop.py`
   - 验证：`nanobot agent -m "回复数字456" --no-markdown -s "test:save_fix_verify"` → session 中有 `[assistant] 456`
 - ✅ **T7.2** 修复 Markdown 渲染多余空行：`.bubble` 移除 `white-space: pre-wrap`，用户消息通过 `.content` class 单独保留 `pre-wrap`
 - ✅ **T7.3** subprocess timeout 从 120s 调整为 300s

@@ -1,7 +1,7 @@
 # Provider Pool — Web Chat 集成设计
 
 > 更新于 2026-03-01
-> **nanobot 核心设计**：见 [`nanobot/docs/REQUIREMENTS.md §十五`](file:///Users/zhangxingcheng/Documents/code/workspace/nanobot/docs/REQUIREMENTS.md) 和 [`nanobot/docs/ARCHITECTURE.md §七`](file:///Users/zhangxingcheng/Documents/code/workspace/nanobot/docs/ARCHITECTURE.md)
+> **nanobot 核心设计**：见 nanobot 核心仓库 `docs/REQUIREMENTS.md §十五` 和 `docs/ARCHITECTURE.md §七`
 
 ## 概述
 

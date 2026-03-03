@@ -1448,7 +1448,7 @@ Web UI 的斜杠命令分为两层处理：
 
 ## 十六、Provider 动态切换 (v4.3)
 
-> 依赖：nanobot 核心 ProviderPool（[`nanobot/docs/ARCHITECTURE.md §七`](/Users/zhangxingcheng/Documents/code/workspace/nanobot/docs/ARCHITECTURE.md)）
+> 依赖：nanobot 核心 ProviderPool（nanobot 核心仓库 `docs/ARCHITECTURE.md §七`）
 
 ### 16.1 架构概览
 
