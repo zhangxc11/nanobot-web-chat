@@ -1639,6 +1639,30 @@ Provider 选择器（ChatInput 上方）：
 
 ---
 
+## 三十二、LLM 错误响应前端展示 (v4.4)
+
+### 需求背景
+
+nanobot core 合并 upstream 后，LLM API 返回 `finish_reason="error"` 时不再存储到 session JSONL。这导致 web-chat 前端无法显示错误信息，用户看到空白或 loading 状态。
+
+Phase 23（nanobot core）已修复后端，将错误消息以 `"Error calling LLM: {text}"` 前缀存储到 JSONL，并通过 `callbacks.on_message()` + `on_progress()` 通知前端。
+
+### 前端需求
+
+1. 检测 assistant 消息中的 `"Error calling LLM:"` 前缀
+2. 剥离前缀，显示干净的错误文本
+3. 错误消息使用 ❌ 图标 + 红色调气泡样式，与正常消息区分
+4. 在 `MessageItem`（独立消息）和 `AssistantTurnGroup`（工具调用+回复组）中均生效
+
+### 改动范围
+
+| 文件 | 改动 |
+|------|------|
+| `MessageItem.tsx` | `isErrorMessage()` / `getErrorText()` 辅助函数 + 错误样式应用 |
+| `MessageList.module.css` | `.errorBubble` / `.errorIcon` / `.errorText` 样式 |
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。

@@ -44,6 +44,7 @@
 | Phase 35: Session 列表按来源分组 (Issue #42) | ✅ 已完成 | web-chat: main |
 | Phase 36: ProviderPool — Web Chat Provider 切换 (Issue #43) | 🔜 进行中 | fix/sse-freeze |
 | Phase 37: Bug 修复 — SSE 流中断导致前端卡死 | ✅ 已完成 | fix/sse-freeze |
+| Phase 38: LLM 错误响应前端展示 | ✅ 已完成 | main |
 
 ---
 
