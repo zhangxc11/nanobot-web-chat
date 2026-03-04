@@ -655,11 +655,33 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
     # ── Config API handlers ──
 
+    # Default fields that every provider entry should have (for frontend display).
+    _PROVIDER_DEFAULTS = {
+        'apiKey': '',
+        'apiBase': None,
+        'extraHeaders': None,
+        'preferredModel': None,
+    }
+
     def _handle_get_config(self):
-        """GET /api/config — read config.json."""
+        """GET /api/config — read config.json.
+
+        Ensures every provider entry has all standard fields so the
+        frontend ConfigPage can render them (it only shows existing keys).
+        """
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
+
+            # Back-fill missing provider fields so frontend can display them
+            providers = config.get('providers')
+            if isinstance(providers, dict):
+                for _name, prov in providers.items():
+                    if isinstance(prov, dict):
+                        for field, default in self._PROVIDER_DEFAULTS.items():
+                            if field not in prov:
+                                prov[field] = default
+
             self._send_json(config)
         except FileNotFoundError:
             self._send_json({'error': 'Config file not found'}, 404)
