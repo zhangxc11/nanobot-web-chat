@@ -1663,9 +1663,9 @@ Phase 23（nanobot core）已修复后端，将错误消息以 `"Error calling L
 
 ---
 
-## 三十三、Provider 配置热加载 + 默认模型配置 (v4.5)
+## 三十三、Provider 配置热加载 + 默认模型配置 (v4.5) ✅ 已完成
 
-> 2026-03-04 Provider 管理增强
+> 2026-03-04 Provider 管理增强 — Phase 40 实现
 
 ### Issue #44：新增 Provider 配置后 Web Chat 不显示
 
