@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useProviderStore } from '@/store/providerStore';
 import styles from './ConfigPage.module.css';
 
 interface ConfigSection {
@@ -307,7 +308,19 @@ export default function ConfigPage() {
         body: JSON.stringify(config),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setSaveMessage('✅ 配置已保存');
+      const result = await res.json();
+      
+      // Check if provider reload succeeded
+      const reloadStatus = result.provider_reload?.status;
+      if (reloadStatus === 'reloaded') {
+        setSaveMessage('✅ 配置已保存，Provider 已重新加载');
+        // Refresh provider store so UI reflects new providers
+        useProviderStore.getState().fetchProvider();
+      } else if (reloadStatus === 'reload_failed') {
+        setSaveMessage('✅ 配置已保存（Provider 重载失败，可能需要重启服务）');
+      } else {
+        setSaveMessage('✅ 配置已保存');
+      }
       setDirty(false);
     } catch (e) {
       setSaveMessage(`❌ 保存失败: ${e instanceof Error ? e.message : '未知错误'}`);

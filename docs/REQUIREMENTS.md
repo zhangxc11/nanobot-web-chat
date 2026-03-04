@@ -1663,6 +1663,113 @@ Phase 23（nanobot core）已修复后端，将错误消息以 `"Error calling L
 
 ---
 
+## 三十三、Provider 配置热加载 + 默认模型配置 (v4.5)
+
+> 2026-03-04 Provider 管理增强
+
+### Issue #44：新增 Provider 配置后 Web Chat 不显示
+
+**现象**：
+1. 在配置页面新增 `gemini` 和 `custom` provider 的 API Key 并保存
+2. ChatInput 的 Provider 选择器下拉列表中不显示新增的 provider
+3. 只有重启 Worker 服务后才能看到
+
+**根因**：
+- Worker 的 `_provider_pool` 是模块级单例，`_build_pool()` 只在首次调用时执行
+- 配置保存后 Worker 不知道需要重新加载配置
+- ProviderPool 一旦构建就不会自动更新
+
+**解决方案**：
+1. Worker 新增 `POST /provider/reload` 端点 — 重新从 config 构建 ProviderPool
+2. Webserver 新增 `POST /api/provider/reload` 转发路由
+3. Webserver 在 `PUT /api/config` 保存成功后自动调用 Worker reload
+4. 前端 ConfigPage 保存成功后刷新 providerStore
+
+### Issue #45：配置保存后不立即生效
+
+**现象**：
+1. 在配置页面修改 provider 的 API Key 或 API Base 后保存
+2. 发送消息仍然使用旧的配置
+3. 需要手动重启 Worker 才能生效
+
+**解决方案**：
+- 同 Issue #44，通过 reload 机制解决
+- 保存配置后自动触发 Worker 重新加载 ProviderPool
+- reload 时保持当前 active provider（如果仍然可用），否则切换到默认
+
+### Issue #46：Provider 缺少可配置的默认优先模型
+
+**现象**：
+1. Provider 选择器中每个 provider 显示的 model 是硬编码的默认值（如 gemini 固定显示 `gemini-2.0-flash`）
+2. 用户无法为每个 provider 配置自己偏好的默认模型
+3. 切换 provider 时只能使用硬编码的默认模型
+
+**解决方案**：
+1. nanobot 核心 `ProviderConfig` schema 新增 `preferred_model` 字段（可选）
+2. `_make_provider()` 构建 ProviderPool 时优先使用 `preferred_model`，fallback 到 `_PROVIDER_DEFAULT_MODELS` 硬编码值
+3. 前端配置页面可编辑 `preferredModel` 字段
+4. Provider 选择器下拉列表中显示配置的 preferred model
+
+**技术方案**：
+
+#### nanobot 核心改动
+
+```python
+# config/schema.py
+class ProviderConfig(Base):
+    api_key: str = ""
+    api_base: str | None = None
+    extra_headers: dict[str, str] | None = None
+    preferred_model: str | None = None  # ← 新增：用户偏好的默认模型
+
+# cli/commands.py _make_provider()
+# 构建 pool_entries 时：
+# model_for_entry = p.preferred_model or _default_model_for_provider(spec.name)
+```
+
+#### Worker 改动
+
+```python
+# POST /provider/reload — rebuild ProviderPool from config
+def _handle_reload_provider(self):
+    global _provider_pool
+    with _pool_lock:
+        if _has_running_tasks():
+            return 409, {"error": "Tasks running, cannot reload"}
+        old_active = _provider_pool.active_provider if _provider_pool else None
+        _provider_pool = _build_pool()
+        # Try to preserve active provider
+        if old_active and old_active in [p['name'] for p in _provider_pool.available]:
+            _provider_pool.switch(old_active)
+    return 200, {"status": "reloaded", ...}
+```
+
+#### Webserver 改动
+
+```python
+# PUT /api/config 保存成功后：
+# 自动调用 Worker POST /provider/reload
+
+# POST /api/provider/reload 转发路由
+```
+
+#### 前端改动
+
+- ConfigPage: 保存成功后调用 `providerStore.fetchProvider()` 刷新
+- 无需新增 UI 组件
+
+**改动范围**：
+
+| 文件 | 改动 | 风险 |
+|------|------|------|
+| nanobot `config/schema.py` | ProviderConfig 新增 `preferred_model` | 🔴 高风险 |
+| nanobot `cli/commands.py` | `_make_provider()` 使用 preferred_model | 🔴 高风险 |
+| `worker.py` | POST /provider/reload 端点 | 🔴 高风险 |
+| `webserver.py` | POST /api/provider/reload 转发 + config 保存后 reload | 🟡 中风险 |
+| `frontend/src/pages/config/ConfigPage.tsx` | 保存后刷新 provider | 🟢 安全 |
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。

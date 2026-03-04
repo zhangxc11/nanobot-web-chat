@@ -407,6 +407,8 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_execute()
         elif path == '/execute-stream':
             self._handle_execute_stream()
+        elif path == '/provider/reload':
+            self._handle_reload_provider()
         elif path.startswith('/tasks/') and path.endswith('/kill'):
             session_key = path[7:-5]
             session_key = session_key.replace('%3A', ':').replace('%3a', ':')
@@ -747,6 +749,54 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             })
         except ValueError as e:
             self._send_json({'error': str(e)}, 400)
+
+    def _handle_reload_provider(self):
+        """POST /provider/reload — rebuild ProviderPool from config.
+        
+        Reloads config.json and rebuilds the ProviderPool singleton.
+        Tries to preserve the current active provider if still available.
+        Rejected if tasks are running (409).
+        """
+        global _provider_pool
+
+        if _has_running_tasks():
+            self._send_json({
+                'error': 'Tasks running, cannot reload provider pool',
+            }, 409)
+            return
+
+        with _pool_lock:
+            old_active = _provider_pool.active_provider if _provider_pool else None
+            old_model = _provider_pool.active_model if _provider_pool else None
+            try:
+                new_pool = _build_pool()
+                # Try to preserve active provider
+                available_names = [p['name'] for p in new_pool.available]
+                if old_active and old_active in available_names:
+                    try:
+                        new_pool.switch(old_active, old_model)
+                        logger.info(f"Provider pool reloaded, preserved active: {old_active}/{old_model}")
+                    except ValueError:
+                        # old_model might not be valid, use provider's default
+                        new_pool.switch(old_active)
+                        logger.info(f"Provider pool reloaded, preserved provider: {old_active}, model reset to default")
+                else:
+                    logger.info(f"Provider pool reloaded, active changed: {old_active} → {new_pool.active_provider}")
+                _provider_pool = new_pool
+            except Exception as e:
+                logger.error(f"Failed to reload provider pool: {e}")
+                self._send_json({'error': f'Reload failed: {e}'}, 500)
+                return
+
+        pool = _provider_pool
+        self._send_json({
+            'status': 'reloaded',
+            'active': {
+                'name': pool.active_provider,
+                'model': pool.active_model,
+            },
+            'available': pool.available,
+        })
 
     # ── Task status query ──
 

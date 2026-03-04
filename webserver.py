@@ -254,6 +254,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_inject_message(route_params['id'])
             return
 
+        if path == '/api/provider/reload':
+            self._handle_proxy_provider_reload()
+            return
+
         self._send_json({'error': 'Not found'}, 404)
 
     # ── PUT routes ──
@@ -666,7 +670,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'error': str(e)}, 500)
 
     def _handle_put_config(self):
-        """PUT /api/config — write config.json."""
+        """PUT /api/config — write config.json, then reload worker ProviderPool."""
         try:
             data = self._read_body()
             if not isinstance(data, dict):
@@ -679,7 +683,28 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                 f.write('\n')
 
             logger.info("Config updated successfully")
-            self._send_json({'success': True, 'message': 'Config saved'})
+
+            # Trigger worker ProviderPool reload (best-effort, don't fail the save)
+            reload_result = None
+            try:
+                req = urllib.request.Request(
+                    f'{WORKER_URL}/provider/reload',
+                    data=b'',
+                    headers={'Content-Type': 'application/json'},
+                    method='POST',
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    reload_result = json.loads(resp.read().decode('utf-8'))
+                logger.info(f"Provider pool auto-reloaded after config save: {reload_result.get('active', {})}")
+            except Exception as e:
+                logger.warning(f"Provider pool reload after config save failed (non-fatal): {e}")
+                reload_result = {'status': 'reload_failed', 'error': str(e)}
+
+            self._send_json({
+                'success': True,
+                'message': 'Config saved',
+                'provider_reload': reload_result,
+            })
         except Exception as e:
             logger.error(f"Failed to write config: {e}")
             self._send_json({'error': str(e)}, 500)
@@ -1164,6 +1189,33 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'error': 'Worker unavailable'}, 502)
         except Exception as e:
             logger.error(f"Provider switch error: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_proxy_provider_reload(self):
+        """POST /api/provider/reload — forward to worker POST /provider/reload."""
+        try:
+            req = urllib.request.Request(
+                f'{WORKER_URL}/provider/reload',
+                data=b'',
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            logger.info(f"Provider pool reloaded via worker: {data.get('active', {})}")
+            self._send_json(data)
+        except urllib.error.HTTPError as e:
+            resp_body = e.read().decode('utf-8', errors='replace')
+            try:
+                result = json.loads(resp_body)
+            except Exception:
+                result = {'error': resp_body}
+            self._send_json(result, e.code)
+        except urllib.error.URLError as e:
+            logger.error(f"Worker unavailable for provider reload: {e}")
+            self._send_json({'error': 'Worker unavailable'}, 502)
+        except Exception as e:
+            logger.error(f"Provider reload error: {e}")
             self._send_json({'error': str(e)}, 500)
 
     def _handle_send_message(self, session_id):
