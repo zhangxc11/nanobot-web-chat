@@ -48,6 +48,7 @@
 | Phase 39: Message 工具 fallback 显示 + 项目清理 | ✅ 已完成 | main |
 | Phase 40: Provider 配置热加载 + 默认模型配置 (Issue #44/#45/#46) | 🔜 进行中 | main |
 | Phase 41: API Session 前端辨识 (Issue #47 / Backlog #15 → B5) | ✅ 已完成 | main |
+| Phase 42: Session 树形结构 (Issue #48) | ✅ 已完成 | main |
 
 ---
 
@@ -1615,3 +1616,66 @@ function isApiSession(sessionKey: string): boolean {
 ### Git
 - web-chat commits: `d04d91c` (main feature), `0532e61` (subagent channel)
 - nanobot commit: `f2d456f` (subagent session key format)
+
+---
+
+## Phase 42: Session 树形结构 — 父子关系 + 折叠面板 + 徽章 (Issue #48)
+
+> 日期：2026-03-06
+> 需求：API session 支持父子关系树形展示，子 session 折叠在父 session 下方
+
+### 需求概述
+
+API 创建的 session 之间存在父子关系（如 dispatch → worker），需要在侧边栏以树形结构展示：
+1. 根 session 显示后代数量徽章
+2. 子 session 可折叠/展开
+3. 总清单计数只数根节点
+
+### 数据源
+
+#### 1. 映射文件 `session_parents.json`
+- 位置：`~/.nanobot/workspace/sessions/session_parents.json`
+- 格式：`{ "子session_key": "父session_key" }`
+- 后端 API：`GET /api/sessions/parents` 返回映射
+
+#### 2. 启发式规则（前端）
+- `subagent:{parent_key_sanitized}_{task_id}` → 提取 parent key
+- 映射文件优先，启发式作为补充
+
+### 任务清单
+
+- ✅ **T42.1** 后端：`GET /api/sessions/parents` API
+  - `webserver.py` 新增路由，读取 `session_parents.json` 返回
+  - `api.ts` 新增 `fetchSessionParents()` API
+
+- ✅ **T42.2** 前端：`sessionStore` 加载 parentMap
+  - `fetchSessions()` 同时拉取 parentMap
+  - `parentMap: Record<string, string>` 状态字段
+
+- ✅ **T42.3** 前端：`SessionList.tsx` 树形结构构建
+  - `buildSessionTree()` 函数：映射文件 + subagent 启发式 → 树形节点
+  - `TreeNode` 接口：session + children + descendantCount
+  - 底层向上计算 descendantCount
+
+- ✅ **T42.4** 前端：树形渲染 UI
+  - 根 session 显示蓝色数字徽章（descendantCount）
+  - 可折叠子 session 面板（"收起/展开 N 个子 session"）
+  - 子 session 缩进 + 箭头指示器
+  - 递归渲染支持多级嵌套
+
+- ✅ **T42.5** Bug 修复：根 session 徽章被 overflow 截断
+  - 问题：`.sessionSummary` 的 `overflow: hidden` + `text-overflow: ellipsis` 把徽章裁掉
+  - 修复：文本包到 `.sessionSummaryText` span，truncation 只作用于文本，徽章 `flex-shrink: 0` 始终可见
+
+- ✅ **T42.6** 总清单计数修正
+  - 分组标题旁的 session 计数只数根节点（`group.roots.length`），不含子 session
+
+### 改动文件
+- `webserver.py` — `GET /api/sessions/parents` 路由
+- `frontend/src/services/api.ts` — `fetchSessionParents()` API
+- `frontend/src/store/sessionStore.ts` — `parentMap` 状态 + 加载逻辑
+- `frontend/src/pages/chat/Sidebar/SessionList.tsx` — 树形结构全面重写（buildSessionTree, TreeNode, 递归渲染, 徽章, 折叠面板）
+- `frontend/src/pages/chat/Sidebar/Sidebar.module.css` — 树形节点样式（treeNodeRow, treeChildrenContainer, childBadge, sessionSummaryText 等）
+
+### Git
+- web-chat commit: (pending)

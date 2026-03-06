@@ -12,6 +12,21 @@ export async function fetchSessions(): Promise<{ sessions: Session[] }> {
   return res.json();
 }
 
+export async function fetchSessionParents(): Promise<Record<string, string>> {
+  const res = await fetch(`${API_BASE}/sessions/parents`);
+  if (!res.ok) throw new Error(`Failed to fetch session parents: ${res.status}`);
+  return res.json();
+}
+
+export async function updateSessionParents(parents: Record<string, string>): Promise<void> {
+  const res = await fetch(`${API_BASE}/sessions/parents`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(parents),
+  });
+  if (!res.ok) throw new Error(`Failed to update session parents: ${res.status}`);
+}
+
 export async function createSession(): Promise<Session> {
   const res = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
   if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);

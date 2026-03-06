@@ -1,20 +1,9 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSessionStore } from '@/store/sessionStore';
 import type { Session } from '@/types';
 import styles from './Sidebar.module.css';
 
-interface SessionItemProps {
-  id: string;
-  summary: string;
-  filename: string;
-  sessionKey: string;
-  lastActiveAt: string;
-  messageCount: number;
-  isActive: boolean;
-  onClick: () => void;
-  onRename: (id: string, newName: string) => void;
-  onDelete: (id: string) => void;
-}
+// ── Helpers ──
 
 function formatTime(isoStr: string): string {
   if (!isoStr) return '';
@@ -31,11 +20,8 @@ function formatTime(isoStr: string): string {
   }
 }
 
-/** Generate a display title for the session */
 function getDisplayTitle(summary: string, _sessionKey: string, id: string): string {
-  // If summary is just the session id (no custom name, no user message), use a friendlier name
   if (summary === id) {
-    // webchat_1772030778 → "新对话"
     if (id.startsWith('webchat_')) return '新对话';
     if (id.startsWith('cli_')) return 'CLI 对话';
     if (id.startsWith('telegram_')) return 'Telegram 对话';
@@ -46,15 +32,7 @@ function getDisplayTitle(summary: string, _sessionKey: string, id: string): stri
   return summary;
 }
 
-// ── Channel grouping ──
-
-interface ChannelGroup {
-  key: string;
-  label: string;
-  icon: string;
-  sessions: Session[];       // manual sessions (or all for non-webchat)
-  apiSessions: Session[];    // API-created sessions (webchat only)
-}
+// ── Channel config ──
 
 const CHANNEL_CONFIG: Record<string, { label: string; icon: string; order: number }> = {
   webchat:   { label: '网页对话',  icon: '🌐', order: 0 },
@@ -67,74 +45,164 @@ const CHANNEL_CONFIG: Record<string, { label: string; icon: string; order: numbe
   other:     { label: '其他',      icon: '📁', order: 7 },
 };
 
-/** Extract channel from sessionKey (e.g. "feishu.lab:xxx" → "feishu") */
 function getChannel(sessionKey: string): string {
   if (!sessionKey) return 'other';
   const colonIdx = sessionKey.indexOf(':');
   const prefix = colonIdx > 0 ? sessionKey.substring(0, colonIdx) : sessionKey;
-  // Normalize: "feishu.lab" → "feishu", "feishu.ST" → "feishu"
   const dotIdx = prefix.indexOf('.');
   const base = dotIdx > 0 ? prefix.substring(0, dotIdx) : prefix;
   return CHANNEL_CONFIG[base] ? base : 'other';
 }
 
-/** Check if a webchat session is API-created (non-numeric part after colon) */
-function isApiSession(sessionKey: string): boolean {
-  if (!sessionKey) return false;
-  const colonIdx = sessionKey.indexOf(':');
-  if (colonIdx < 0) return false;
-  const suffix = sessionKey.substring(colonIdx + 1);
-  // Pure numeric = manual (e.g. "webchat:1772030778")
-  // Non-numeric = API-created (e.g. "webchat:dispatch_1772696251_gen1")
-  return !/^\d+$/.test(suffix);
+// ── Tree building ──
+
+/** A node in the session tree */
+interface SessionTreeNode {
+  session: Session;
+  children: SessionTreeNode[];
+  /** Total descendant count (not including self) */
+  descendantCount: number;
 }
 
-/** Group sessions by channel, preserving sort order within each group */
-function groupSessionsByChannel(sessions: Session[]): ChannelGroup[] {
-  const groupMap = new Map<string, Session[]>();
+/**
+ * Resolve the parent sessionKey for a session.
+ * 1. Check manual parentMap (highest priority)
+ * 2. Heuristic: subagent sessions parse parent from key
+ * 3. Return null if no parent found (root session)
+ */
+function resolveParent(
+  session: Session,
+  parentMap: Record<string, string>,
+): string | null {
+  const sk = session.sessionKey || '';
+  const id = session.id || '';
 
-  for (const session of sessions) {
-    const channel = getChannel(session.sessionKey || '');
-    if (!groupMap.has(channel)) {
-      groupMap.set(channel, []);
+  // 1. Manual override — check by sessionKey and by id
+  if (parentMap[sk]) return parentMap[sk];
+  if (parentMap[id]) return parentMap[id];
+
+  // 2. Subagent heuristic: subagent:{parent_sanitized}_{8hex}
+  if (sk.startsWith('subagent:')) {
+    const suffix = sk.substring('subagent:'.length);
+    const match = suffix.match(/^(.+)_([0-9a-f]{8})$/);
+    if (match) {
+      const parentSanitized = match[1];
+      const underIdx = parentSanitized.indexOf('_');
+      if (underIdx > 0) {
+        return parentSanitized.substring(0, underIdx) + ':' + parentSanitized.substring(underIdx + 1);
+      }
+      return parentSanitized;
     }
-    groupMap.get(channel)!.push(session);
+  }
+
+  return null;
+}
+
+/**
+ * Build the full session tree.
+ * Returns: { roots, childMap, descendantCount }
+ *   - roots: sessions that have no parent (or parent not found)
+ *   - childMap: sessionKey → direct children SessionTreeNodes
+ *   - descendantCount: sessionKey → total descendant count
+ */
+function buildSessionTree(
+  sessions: Session[],
+  parentMap: Record<string, string>,
+): {
+  roots: SessionTreeNode[];
+  nodeByKey: Map<string, SessionTreeNode>;
+} {
+  // Build lookup by sessionKey AND by id
+  const sessionByKey = new Map<string, Session>();
+  for (const s of sessions) {
+    if (s.sessionKey) sessionByKey.set(s.sessionKey, s);
+    sessionByKey.set(s.id, s);
+  }
+
+  // Create tree nodes
+  const nodeByKey = new Map<string, SessionTreeNode>();
+  for (const s of sessions) {
+    const key = s.sessionKey || s.id;
+    if (!nodeByKey.has(key)) {
+      nodeByKey.set(key, { session: s, children: [], descendantCount: 0 });
+    }
+  }
+
+  // Assign children
+  const childSessionKeys = new Set<string>();
+  for (const s of sessions) {
+    const parentKey = resolveParent(s, parentMap);
+    if (!parentKey) continue;
+
+    const parentNode = nodeByKey.get(parentKey);
+    const childKey = s.sessionKey || s.id;
+    const childNode = nodeByKey.get(childKey);
+    if (parentNode && childNode && parentNode !== childNode) {
+      parentNode.children.push(childNode);
+      childSessionKeys.add(childKey);
+    }
+  }
+
+  // Compute descendant counts (bottom-up)
+  function computeDescendants(node: SessionTreeNode): number {
+    let count = 0;
+    for (const child of node.children) {
+      count += 1 + computeDescendants(child);
+    }
+    node.descendantCount = count;
+    return count;
+  }
+
+  // Roots = sessions not assigned as children
+  const roots: SessionTreeNode[] = [];
+  for (const s of sessions) {
+    const key = s.sessionKey || s.id;
+    if (!childSessionKeys.has(key)) {
+      const node = nodeByKey.get(key);
+      if (node) roots.push(node);
+    }
+  }
+
+  // Sort children by lastActiveAt descending
+  function sortChildren(node: SessionTreeNode) {
+    node.children.sort((a, b) =>
+      (b.session.lastActiveAt || '').localeCompare(a.session.lastActiveAt || '')
+    );
+    for (const child of node.children) sortChildren(child);
+  }
+
+  for (const root of roots) {
+    computeDescendants(root);
+    sortChildren(root);
+  }
+
+  return { roots, nodeByKey };
+}
+
+// ── Group roots by channel ──
+
+interface ChannelGroup {
+  key: string;
+  label: string;
+  icon: string;
+  roots: SessionTreeNode[];
+}
+
+function groupByChannel(roots: SessionTreeNode[]): ChannelGroup[] {
+  const groupMap = new Map<string, SessionTreeNode[]>();
+
+  for (const node of roots) {
+    const ch = getChannel(node.session.sessionKey || '');
+    if (!groupMap.has(ch)) groupMap.set(ch, []);
+    groupMap.get(ch)!.push(node);
   }
 
   const groups: ChannelGroup[] = [];
-  for (const [key, groupSessions] of groupMap) {
+  for (const [key, nodes] of groupMap) {
     const config = CHANNEL_CONFIG[key] || CHANNEL_CONFIG.other;
-
-    // For webchat channel, split into manual vs API sessions
-    if (key === 'webchat') {
-      const manual: Session[] = [];
-      const api: Session[] = [];
-      for (const s of groupSessions) {
-        if (isApiSession(s.sessionKey || '')) {
-          api.push(s);
-        } else {
-          manual.push(s);
-        }
-      }
-      groups.push({
-        key,
-        label: config.label,
-        icon: config.icon,
-        sessions: manual,
-        apiSessions: api,
-      });
-    } else {
-      groups.push({
-        key,
-        label: config.label,
-        icon: config.icon,
-        sessions: groupSessions,
-        apiSessions: [],
-      });
-    }
+    groups.push({ key, label: config.label, icon: config.icon, roots: nodes });
   }
 
-  // Sort groups: webchat first, then by configured order
   groups.sort((a, b) => {
     const orderA = CHANNEL_CONFIG[a.key]?.order ?? 99;
     const orderB = CHANNEL_CONFIG[b.key]?.order ?? 99;
@@ -146,9 +214,23 @@ function groupSessionsByChannel(sessions: Session[]): ChannelGroup[] {
 
 // ── Components ──
 
+interface SessionItemProps {
+  id: string;
+  summary: string;
+  filename: string;
+  sessionKey: string;
+  lastActiveAt: string;
+  messageCount: number;
+  isActive: boolean;
+  descendantCount: number;
+  onClick: () => void;
+  onRename: (id: string, newName: string) => void;
+  onDelete: (id: string) => void;
+}
+
 function SessionItem({
   id, summary, filename, sessionKey, lastActiveAt,
-  isActive, onClick, onRename, onDelete,
+  isActive, descendantCount, onClick, onRename, onDelete,
 }: SessionItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(summary);
@@ -177,12 +259,8 @@ function SessionItem({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleConfirm();
-    } else if (e.key === 'Escape') {
-      setEditing(false);
-      setEditValue(summary);
-    }
+    if (e.key === 'Enter') handleConfirm();
+    else if (e.key === 'Escape') { setEditing(false); setEditValue(summary); }
   };
 
   const handleDeleteClick = (e: React.MouseEvent) => {
@@ -222,7 +300,12 @@ function SessionItem({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <div className={styles.sessionSummary}>{displayTitle}</div>
+          <div className={styles.sessionSummary}>
+            <span className={styles.sessionSummaryText}>{displayTitle}</span>
+            {descendantCount > 0 && (
+              <span className={styles.childBadge}>{descendantCount}</span>
+            )}
+          </div>
         )}
         {!editing && (
           <button
@@ -249,18 +332,160 @@ function SessionItem({
   );
 }
 
-function ChannelGroupHeader({
-  icon,
-  label,
-  count,
-  collapsed,
+/** Inline children panel shown below the active parent session */
+function ChildrenPanel({
+  children,
+  depth,
+  expandedKeys,
   onToggle,
+  activeSessionId,
+  onSelect,
+  onRename,
+  onDelete,
 }: {
-  icon: string;
-  label: string;
-  count: number;
-  collapsed: boolean;
-  onToggle: () => void;
+  children: SessionTreeNode[];
+  depth: number;
+  expandedKeys: Record<string, boolean>;
+  onToggle: (key: string) => void;
+  activeSessionId: string | null;
+  onSelect: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  if (children.length === 0) return null;
+
+  const indent = 12 + depth * 10;
+
+  return (
+    <div className={styles.childrenPanel} style={{ paddingLeft: indent }}>
+      {children.map((child) => {
+        const ck = child.session.sessionKey || child.session.id;
+        const isActive = child.session.id === activeSessionId;
+        const isExpanded = expandedKeys[ck] === true;
+        const hasChildren = child.children.length > 0;
+
+        return (
+          <div key={ck} className={styles.childNodeWrapper}>
+            <div className={styles.childNodeRow}>
+              {hasChildren ? (
+                <button
+                  className={styles.childExpandBtn}
+                  onClick={(e) => { e.stopPropagation(); onToggle(ck); }}
+                >
+                  {isExpanded ? '▾' : '▸'}
+                </button>
+              ) : (
+                <span className={styles.childExpandPlaceholder}>·</span>
+              )}
+              <div
+                className={`${styles.childItem} ${isActive ? styles.childItemActive : ''}`}
+                onClick={() => onSelect(child.session.id)}
+                title={child.session.sessionKey}
+              >
+                <span className={styles.childItemTitle}>
+                  {getDisplayTitle(child.session.summary, child.session.sessionKey || '', child.session.id)}
+                </span>
+                {child.descendantCount > 0 && (
+                  <span className={styles.childBadge}>{child.descendantCount}</span>
+                )}
+                <span className={styles.childItemTime}>{formatTime(child.session.lastActiveAt)}</span>
+              </div>
+            </div>
+            {hasChildren && isExpanded && (
+              <ChildrenPanel
+                children={child.children}
+                depth={depth + 1}
+                expandedKeys={expandedKeys}
+                onToggle={onToggle}
+                activeSessionId={activeSessionId}
+                onSelect={onSelect}
+                onRename={onRename}
+                onDelete={onDelete}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A session tree node: session item + optional inline children below */
+function SessionTreeItem({
+  node,
+  activeSessionId,
+  expandedKeys,
+  onToggleExpand,
+  onSelect,
+  onRename,
+  onDelete,
+}: {
+  node: SessionTreeNode;
+  activeSessionId: string | null;
+  expandedKeys: Record<string, boolean>;
+  onToggleExpand: (key: string) => void;
+  onSelect: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const sk = node.session.sessionKey || node.session.id;
+  const isActive = node.session.id === activeSessionId;
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expandedKeys[sk] === true;
+
+  // Show children panel if: this node is active OR explicitly expanded
+  const showChildren = hasChildren && (isActive || isExpanded);
+
+  return (
+    <div>
+      <div className={styles.treeNodeRow}>
+        <SessionItem
+          id={node.session.id}
+          summary={node.session.summary}
+          filename={node.session.filename || node.session.id + '.jsonl'}
+          sessionKey={node.session.sessionKey || ''}
+          lastActiveAt={node.session.lastActiveAt}
+          messageCount={node.session.messageCount}
+          isActive={isActive}
+          descendantCount={node.descendantCount}
+          onClick={() => onSelect(node.session.id)}
+          onRename={onRename}
+          onDelete={onDelete}
+        />
+      </div>
+      {showChildren && (
+        <div className={styles.treeChildrenContainer}>
+          <div
+            className={styles.treeChildrenToggle}
+            onClick={() => onToggleExpand(sk)}
+          >
+            <span className={styles.treeChildrenArrow}>{isExpanded ? '▾' : '▸'}</span>
+            <span className={styles.treeChildrenLabel}>
+              {isExpanded ? '收起' : '展开'} {node.descendantCount} 个子 session
+            </span>
+          </div>
+          {isExpanded && (
+            <ChildrenPanel
+              children={node.children}
+              depth={0}
+              expandedKeys={expandedKeys}
+              onToggle={onToggleExpand}
+              activeSessionId={activeSessionId}
+              onSelect={onSelect}
+              onRename={onRename}
+              onDelete={onDelete}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChannelGroupHeader({
+  icon, label, count, collapsed, onToggle,
+}: {
+  icon: string; label: string; count: number; collapsed: boolean; onToggle: () => void;
 }) {
   return (
     <div className={styles.channelGroupHeader} onClick={onToggle}>
@@ -272,68 +497,29 @@ function ChannelGroupHeader({
   );
 }
 
-function ApiSessionSubgroup({
-  sessions,
-  collapsed,
-  onToggle,
-  activeSessionId,
-  onSelect,
-  onRename,
-  onDelete,
-}: {
-  sessions: Session[];
-  collapsed: boolean;
-  onToggle: () => void;
-  activeSessionId: string | null;
-  onSelect: (id: string) => void;
-  onRename: (id: string, name: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  if (sessions.length === 0) return null;
-  return (
-    <div className={styles.apiSubgroup}>
-      <div className={styles.apiSubgroupHeader} onClick={onToggle}>
-        <span className={styles.apiSubgroupArrow}>{collapsed ? '▸' : '▾'}</span>
-        <span className={styles.apiSubgroupIcon}>🤖</span>
-        <span className={styles.apiSubgroupLabel}>自动任务</span>
-        <span className={styles.apiSubgroupCount}>{sessions.length}</span>
-      </div>
-      {!collapsed && (
-        <div className={styles.apiSubgroupSessions}>
-          {sessions.map((session) => (
-            <SessionItem
-              key={session.id}
-              id={session.id}
-              summary={session.summary}
-              filename={session.filename || session.id + '.jsonl'}
-              sessionKey={session.sessionKey || ''}
-              lastActiveAt={session.lastActiveAt}
-              messageCount={session.messageCount}
-              isActive={session.id === activeSessionId}
-              onClick={() => onSelect(session.id)}
-              onRename={onRename}
-              onDelete={onDelete}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+// ── Main Component ──
 
 export default function SessionList() {
-  const { sessions, activeSessionId, setActiveSession, loading, error, fetchSessions, renameSession, deleteSession } = useSessionStore();
+  const { sessions, parentMap, activeSessionId, setActiveSession, loading, error, fetchSessions, renameSession, deleteSession } = useSessionStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const [apiCollapsed, setApiCollapsed] = useState<boolean>(true); // API sessions default collapsed
+  const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
 
-  const groups = useMemo(() => groupSessionsByChannel(sessions), [sessions]);
+  // Build tree
+  const { roots } = useMemo(
+    () => buildSessionTree(sessions, parentMap),
+    [sessions, parentMap],
+  );
+
+  // Group roots by channel
+  const groups = useMemo(() => groupByChannel(roots), [roots]);
 
   const toggleGroup = (key: string) => {
-    setCollapsedGroups((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+    setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+
+  const toggleExpand = useCallback((key: string) => {
+    setExpandedKeys((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   const handleRename = async (id: string, newName: string) => {
     await renameSession(id, newName);
@@ -344,11 +530,7 @@ export default function SessionList() {
   };
 
   if (loading && sessions.length === 0) {
-    return (
-      <div className={styles.emptyList}>
-        <p>加载中...</p>
-      </div>
-    );
+    return <div className={styles.emptyList}><p>加载中...</p></div>;
   }
 
   if (error && sessions.length === 0) {
@@ -361,71 +543,55 @@ export default function SessionList() {
   }
 
   if (sessions.length === 0) {
-    return (
-      <div className={styles.emptyList}>
-        <p>暂无对话</p>
-      </div>
-    );
+    return <div className={styles.emptyList}><p>暂无对话</p></div>;
   }
 
-  const renderSessionItem = (session: Session) => (
-    <SessionItem
-      key={session.id}
-      id={session.id}
-      summary={session.summary}
-      filename={session.filename || session.id + '.jsonl'}
-      sessionKey={session.sessionKey || ''}
-      lastActiveAt={session.lastActiveAt}
-      messageCount={session.messageCount}
-      isActive={session.id === activeSessionId}
-      onClick={() => setActiveSession(session.id)}
-      onRename={handleRename}
-      onDelete={handleDelete}
-    />
-  );
+  const renderGroup = (group: ChannelGroup, showHeader: boolean) => {
+    // Total count: only root sessions (not counting children)
+    const totalCount = group.roots.length;
 
-  const renderGroupSessions = (group: ChannelGroup, showGroupHeader: boolean) => (
-    <div key={group.key} className={styles.channelGroup}>
-      {showGroupHeader && (
-        <ChannelGroupHeader
-          icon={group.icon}
-          label={group.label}
-          count={group.sessions.length + group.apiSessions.length}
-          collapsed={!!collapsedGroups[group.key]}
-          onToggle={() => toggleGroup(group.key)}
-        />
-      )}
-      {(!showGroupHeader || !collapsedGroups[group.key]) && (
-        <div className={styles.channelGroupSessions}>
-          {group.sessions.map(renderSessionItem)}
-          {group.apiSessions.length > 0 && (
-            <ApiSessionSubgroup
-              sessions={group.apiSessions}
-              collapsed={apiCollapsed}
-              onToggle={() => setApiCollapsed((prev) => !prev)}
-              activeSessionId={activeSessionId}
-              onSelect={setActiveSession}
-              onRename={handleRename}
-              onDelete={handleDelete}
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
+    return (
+      <div key={group.key} className={styles.channelGroup}>
+        {showHeader && (
+          <ChannelGroupHeader
+            icon={group.icon}
+            label={group.label}
+            count={totalCount}
+            collapsed={!!collapsedGroups[group.key]}
+            onToggle={() => toggleGroup(group.key)}
+          />
+        )}
+        {(!showHeader || !collapsedGroups[group.key]) && (
+          <div className={styles.channelGroupSessions}>
+            {group.roots.map((node) => (
+              <SessionTreeItem
+                key={node.session.sessionKey || node.session.id}
+                node={node}
+                activeSessionId={activeSessionId}
+                expandedKeys={expandedKeys}
+                onToggleExpand={toggleExpand}
+                onSelect={setActiveSession}
+                onRename={handleRename}
+                onDelete={handleDelete}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
-  // If only one group, don't show group headers (cleaner look)
   if (groups.length === 1) {
     return (
       <div className={styles.sessionListContainer}>
-        {renderGroupSessions(groups[0], false)}
+        {renderGroup(groups[0], false)}
       </div>
     );
   }
 
   return (
     <div className={styles.sessionListContainer}>
-      {groups.map((group) => renderGroupSessions(group, true))}
+      {groups.map((group) => renderGroup(group, true))}
     </div>
   );
 }

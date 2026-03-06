@@ -1857,6 +1857,34 @@ def _handle_reload_provider(self):
 
 ---
 
+## 三十五、Session 树形结构展示 (v4.7)
+
+> 日期：2026-03-06
+
+### Issue #48：API Session 父子关系树形展示
+
+**来源**：eval-bench 批量构造产生大量父子 session（dispatch → worker），平铺列表中难以识别层级关系。
+
+**需求**：
+1. 后端提供 `session_parents.json` 映射文件 + API（`GET /api/sessions/parents`）
+2. 前端基于映射文件 + subagent 启发式规则构建树形结构
+3. 根 session 显示蓝色后代数量徽章
+4. 子 session 可折叠/展开面板
+5. 分组标题计数只数根节点
+6. 支持多级嵌套递归渲染
+
+**改动范围**：
+
+| 文件 | 改动 | 风险 |
+|------|------|------|
+| `webserver.py` | `GET /api/sessions/parents` 路由 | 🟢 安全 |
+| `frontend/src/services/api.ts` | `fetchSessionParents()` API | 🟢 安全 |
+| `frontend/src/store/sessionStore.ts` | `parentMap` 状态 | 🟢 安全 |
+| `frontend/src/pages/chat/Sidebar/SessionList.tsx` | 树形结构全面重写 | 🟡 低风险 |
+| `frontend/src/pages/chat/Sidebar/Sidebar.module.css` | 树形节点样式 | 🟢 安全 |
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。

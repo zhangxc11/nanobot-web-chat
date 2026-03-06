@@ -35,6 +35,7 @@ for i, arg in enumerate(sys.argv):
         DAEMONIZE = True
 
 SESSIONS_DIR = os.path.expanduser('~/.nanobot/workspace/sessions')
+SESSION_PARENTS_FILE = os.path.join(SESSIONS_DIR, 'session_parents.json')
 MEMORY_DIR = os.path.expanduser('~/.nanobot/workspace/memory')
 UPLOADS_DIR = os.path.expanduser('~/.nanobot/workspace/uploads')
 CONFIG_FILE = os.path.expanduser('~/.nanobot/config.json')
@@ -173,6 +174,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_search_sessions(params)
             return
 
+        if path == '/api/sessions/parents':
+            self._handle_get_session_parents()
+            return
+
         if path == '/api/config':
             self._handle_get_config()
             return
@@ -267,6 +272,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
         if path == '/api/config':
             self._handle_put_config()
+            return
+
+        if path == '/api/sessions/parents':
+            self._handle_put_session_parents()
             return
 
         if path == '/api/provider':
@@ -367,6 +376,45 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         sessions.sort(key=lambda s: s['lastActiveAt'], reverse=True)
         logger.debug(f"Listed {len(sessions)} sessions")
         self._send_json({'sessions': sessions})
+
+    def _handle_get_session_parents(self):
+        """GET /api/sessions/parents — read session parent overrides."""
+        try:
+            if os.path.isfile(SESSION_PARENTS_FILE):
+                with open(SESSION_PARENTS_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = {}
+            self._send_json(data)
+        except Exception as e:
+            logger.error(f"Failed to read session parents: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_put_session_parents(self):
+        """PUT /api/sessions/parents — write session parent overrides."""
+        try:
+            body = self._read_body()
+            if not body:
+                self._send_json({'error': 'Empty body'}, 400)
+                return
+            # Validate: must be a flat dict of string → string
+            if not isinstance(body, dict):
+                self._send_json({'error': 'Body must be a JSON object'}, 400)
+                return
+            for k, v in body.items():
+                if k.startswith('_'):
+                    continue  # skip _comment etc.
+                if not isinstance(k, str) or not isinstance(v, str):
+                    self._send_json({'error': f'Invalid entry: {k}'}, 400)
+                    return
+            os.makedirs(os.path.dirname(SESSION_PARENTS_FILE), exist_ok=True)
+            with open(SESSION_PARENTS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(body, f, indent=2, ensure_ascii=False)
+            logger.info(f"Updated session parents ({len(body)} entries)")
+            self._send_json({'ok': True})
+        except Exception as e:
+            logger.error(f"Failed to write session parents: {e}")
+            self._send_json({'error': str(e)}, 500)
 
     def _handle_get_messages(self, session_id, params):
         """GET /api/sessions/:id/messages — paginated messages."""

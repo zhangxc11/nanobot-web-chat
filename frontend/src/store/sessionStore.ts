@@ -5,6 +5,8 @@ import * as api from '../services/api';
 
 interface SessionStore {
   sessions: Session[];
+  /** Map from child sessionKey (or id) → parent sessionKey */
+  parentMap: Record<string, string>;
   activeSessionId: string | null;
   loading: boolean;
   error: string | null;
@@ -17,6 +19,7 @@ interface SessionStore {
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
+  parentMap: {},
   activeSessionId: null,
   loading: false,
   error: null,
@@ -24,9 +27,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   fetchSessions: async () => {
     set({ loading: true, error: null });
     try {
-      const data = await api.fetchSessions();
-      const sessions = data.sessions || [];
-      set({ sessions, loading: false });
+      const [sessionsData, parentMap] = await Promise.all([
+        api.fetchSessions(),
+        api.fetchSessionParents().catch(() => ({} as Record<string, string>)),
+      ]);
+      const sessions = sessionsData.sessions || [];
+      // Filter out _comment and other meta keys
+      const cleanParentMap: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parentMap)) {
+        if (!k.startsWith('_') && typeof v === 'string') {
+          cleanParentMap[k] = v;
+        }
+      }
+      set({ sessions, parentMap: cleanParentMap, loading: false });
       // Auto-select first session if none active
       if (!get().activeSessionId && sessions.length > 0) {
         set({ activeSessionId: sessions[0].id });
