@@ -1815,9 +1815,10 @@ eval-bench 批量构造产生了大量 API 创建的 session（dispatch/worker/q
 
 API session 之间存在父子关系，需要树形展示。
 
-**父子关系数据源**（两层，优先级递减）：
+**父子关系数据源**（三层，优先级递减）：
 1. **映射文件** `session_parents.json`：手动标注的 `{ 子key: 父key }` 映射，通过后端 API 读取
-2. **启发式规则**：`subagent:{parent_key_sanitized}_{task_id}` 自动提取 parent key
+2. **启发式规则 A**：`subagent:{parent_key_sanitized}_{task_id}` 自动提取 parent key
+3. **启发式规则 B**：`webchat:<role>_<10位timestamp>_<detail>` 提取 timestamp → 在所有 session 中搜索以 `:<timestamp>` 结尾的 session 作为父节点（支持跨通道，如 `cli:xxx`、`feishu.lab:xxx`）
 
 **后端 API**：
 - `GET /api/sessions/parents` — 读取 `~/.nanobot/workspace/sessions/session_parents.json`

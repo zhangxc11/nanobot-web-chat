@@ -67,12 +67,14 @@ interface SessionTreeNode {
 /**
  * Resolve the parent sessionKey for a session.
  * 1. Check manual parentMap (highest priority)
- * 2. Heuristic: subagent sessions parse parent from key
- * 3. Return null if no parent found (root session)
+ * 2. Heuristic A: subagent sessions parse parent from key
+ * 3. Heuristic B: webchat API sessions — extract 10-digit timestamp, find matching parent across all channels
+ * 4. Return null if no parent found (root session)
  */
 function resolveParent(
   session: Session,
   parentMap: Record<string, string>,
+  allSessionKeys?: Set<string>,
 ): string | null {
   const sk = session.sessionKey || '';
   const id = session.id || '';
@@ -95,6 +97,26 @@ function resolveParent(
     }
   }
 
+  // 3. Webchat API session heuristic: webchat:<role>_<10-digit-timestamp>_<detail>
+  //    Extract the 10-digit timestamp, then find any session ending with :<timestamp>
+  //    This supports cross-channel parents (cli:xxx, feishu.lab:xxx, webchat:xxx)
+  if (sk.startsWith('webchat:')) {
+    const suffix = sk.substring('webchat:'.length);
+    // Only for API sessions (suffix contains non-digit chars)
+    if (/[^0-9]/.test(suffix)) {
+      const tsMatch = suffix.match(/_(\d{10})(?:_|$)/);
+      if (tsMatch && allSessionKeys) {
+        const ts = tsMatch[1];
+        // Search for any session whose key ends with :<timestamp>
+        for (const candidate of allSessionKeys) {
+          if (candidate.endsWith(':' + ts)) {
+            return candidate;
+          }
+        }
+      }
+    }
+  }
+
   return null;
 }
 
@@ -114,8 +136,12 @@ function buildSessionTree(
 } {
   // Build lookup by sessionKey AND by id
   const sessionByKey = new Map<string, Session>();
+  const allSessionKeys = new Set<string>();
   for (const s of sessions) {
-    if (s.sessionKey) sessionByKey.set(s.sessionKey, s);
+    if (s.sessionKey) {
+      sessionByKey.set(s.sessionKey, s);
+      allSessionKeys.add(s.sessionKey);
+    }
     sessionByKey.set(s.id, s);
   }
 
@@ -131,7 +157,7 @@ function buildSessionTree(
   // Assign children
   const childSessionKeys = new Set<string>();
   for (const s of sessions) {
-    const parentKey = resolveParent(s, parentMap);
+    const parentKey = resolveParent(s, parentMap, allSessionKeys);
     if (!parentKey) continue;
 
     const parentNode = nodeByKey.get(parentKey);
