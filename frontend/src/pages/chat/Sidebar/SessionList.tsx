@@ -35,11 +35,12 @@ function formatTime(isoStr: string): string {
 function getDisplayTitle(summary: string, _sessionKey: string, id: string): string {
   // If summary is just the session id (no custom name, no user message), use a friendlier name
   if (summary === id) {
-    // webchat_1772030778 → "网页对话"
+    // webchat_1772030778 → "新对话"
     if (id.startsWith('webchat_')) return '新对话';
     if (id.startsWith('cli_')) return 'CLI 对话';
     if (id.startsWith('telegram_')) return 'Telegram 对话';
     if (id.startsWith('feishu')) return '飞书对话';
+    if (id.startsWith('subagent_')) return '🤖 子任务';
     return id;
   }
   return summary;
@@ -56,13 +57,14 @@ interface ChannelGroup {
 }
 
 const CHANNEL_CONFIG: Record<string, { label: string; icon: string; order: number }> = {
-  webchat:  { label: '网页对话', icon: '🌐', order: 0 },
-  cli:      { label: '命令行',   icon: '💻', order: 1 },
-  feishu:   { label: '飞书',     icon: '💬', order: 2 },
-  telegram: { label: 'Telegram', icon: '✈️', order: 3 },
-  discord:  { label: 'Discord',  icon: '🎮', order: 4 },
-  test:     { label: '测试',     icon: '🧪', order: 5 },
-  other:    { label: '其他',     icon: '📁', order: 6 },
+  webchat:   { label: '网页对话',  icon: '🌐', order: 0 },
+  cli:       { label: '命令行',    icon: '💻', order: 1 },
+  feishu:    { label: '飞书',      icon: '💬', order: 2 },
+  telegram:  { label: 'Telegram',  icon: '✈️', order: 3 },
+  discord:   { label: 'Discord',   icon: '🎮', order: 4 },
+  subagent:  { label: '子任务',    icon: '🤖', order: 5 },
+  test:      { label: '测试',      icon: '🧪', order: 6 },
+  other:     { label: '其他',      icon: '📁', order: 7 },
 };
 
 /** Extract channel from sessionKey (e.g. "feishu.lab:xxx" → "feishu") */
