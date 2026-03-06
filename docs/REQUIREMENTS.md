@@ -1772,23 +1772,18 @@ def _handle_reload_provider(self):
 
 ---
 
-## 三十四、API Session 前端辨识与管理 (v4.6~v4.7)
+## 三十四、API Session 前端辨识与树形管理 (v4.6~v4.7)
 
 > 2026-03-06 从 Backlog #15 提升为正式需求（对应 eval-bench 改进需求 B5）
 
-### Issue #47：API 程序化创建的 Session 与手动 Session 混在一起，无法区分
+### 背景与现象
 
-**现象**：
-1. eval-bench 批量构造产生了 54 个 API 创建的 session（dispatch/worker/qa_r2_fix 等），与 71 个手动 session 混在 🌐 网页对话 分组中
-2. 前端 session 列表无法区分哪些是用户手动创建的、哪些是 API 程序化创建的
-3. 批量 session 淹没了手动 session，查找日常对话困难
+eval-bench 批量构造产生了大量 API 创建的 session（dispatch/worker/qa_r2_fix 等），与手动 session 混在 🌐 网页对话 分组中，存在两个层面的问题：
 
-**背景**：
-- 通过 curl POST worker API 可创建任意 session_key 的 session（调度 session、worker session 等）
-- 这些 session 的 session_key 遵循命名规范：`webchat:<role>_<parent_ref>_<detail>`
-- Phase 35 已实现按 channel 分组（webchat/cli/feishu 等），现在需要在 webchat 组内进一步区分
+1. **辨识问题**：无法区分哪些是用户手动创建的、哪些是 API 程序化创建的，批量 session 淹没了日常对话
+2. **层级问题**：API session 之间存在父子关系（dispatch → worker），平铺列表无法体现层级
 
-**API Session 命名模式**（已有数据）：
+### API Session 命名模式
 
 | 模式 | 示例 | 说明 |
 |------|------|------|
@@ -1796,86 +1791,79 @@ def _handle_reload_provider(self):
 | `webchat:worker_*` | `webchat:worker_1772696251_A10` | Worker session |
 | `webchat:qa_r2_dispatch_*` | `webchat:qa_r2_dispatch_1` | QA 调度 session |
 | `webchat:qa_r2_fix_*` | `webchat:qa_r2_fix_task-003` | QA 修复 session |
-| `webchat:<timestamp>` | `webchat:1772030778` | 手动创建（纯数字） |
+| `subagent:*` | `subagent:webchat_1772726793_abc123` | spawn 子 agent session |
+| `webchat:<timestamp>` | `webchat:1772030778` | 手动创建（纯数字 timestamp） |
 
 **识别规则**：webchat channel 下，session_key 冒号后部分如果是纯数字（timestamp），则为手动创建；否则为 API 创建。
 
-**解决方案**：
+### 解决方案
 
-#### 1. 前端 webchat 分组内子分组
+分两步实现：先区分手动/API session（子分组），再在 API session 内建立父子树形结构。
+
+#### Phase 41: API Session 子分组（Issue #47）
 
 在 🌐 网页对话 分组内，将 session 分为两个子组：
-- **手动对话**：session_key 冒号后为纯数字（如 `webchat:1772030778`）
-- **🤖 自动任务**：session_key 冒号后包含非数字字符（如 `webchat:dispatch_*`, `webchat:worker_*`）
+- **手动对话**：session_key 冒号后为纯数字，正常显示在分组头下方
+- **🤖 自动任务**：session_key 冒号后包含非数字字符，收纳在可折叠的子分组内
 
-**渲染示例**：
+**前端实现**（纯前端改动）：
+- `isApiSession(sessionKey)` 辅助函数：冒号后非纯数字 → API session
+- `ApiSessionSubgroup` 组件：🤖 图标 + 计数 + 折叠/展开
+- 子分组头样式比 channel 分组头更小更紧凑
+
+#### Phase 42: 父子关系树形展示（Issue #48）
+
+API session 之间存在父子关系，需要树形展示。
+
+**父子关系数据源**（两层，优先级递减）：
+1. **映射文件** `session_parents.json`：手动标注的 `{ 子key: 父key }` 映射，通过后端 API 读取
+2. **启发式规则**：`subagent:{parent_key_sanitized}_{task_id}` 自动提取 parent key
+
+**后端 API**：
+- `GET /api/sessions/parents` — 读取 `~/.nanobot/workspace/sessions/session_parents.json`
+- `PUT /api/sessions/parents` — 写入映射文件（预留，暂未使用）
+
+**前端实现**：
+- `sessionStore` 加载 `parentMap`，与 session 列表同步拉取
+- `buildSessionTree()` 函数：合并映射文件 + 启发式规则，构建 `TreeNode` 树
+- 根 session 显示蓝色后代数量徽章（`childBadge`）
+- 子 session 可折叠/展开面板（"收起/展开 N 个子 session"）
+- 递归渲染支持多级嵌套
+- 分组标题计数只数根节点（`group.roots.length`）
+
+**UI 渲染示例**：
 ```
-┌──────────────────────────┐
-│ 🌐 网页对话 (125)         │  ← channel 分组头
-│   新对话                  │  ← 手动 session（正常显示）
-│   帮我重构 utils.py       │
-│   查看明天日程            │
-│   ...                    │
-│                          │
-│   🤖 自动任务 (54) ▸      │  ← 子分组头（默认折叠）
-│                          │
-│ 💬 飞书 (8)               │
-│   ...                    │
-└──────────────────────────┘
-
-展开 🤖 自动任务：
-┌──────────────────────────┐
-│   🤖 自动任务 (54) ▾      │  ← 展开
-│     dispatch_...gen1     │
-│     dispatch_...gen2     │
-│     worker_...A10        │
-│     qa_r2_fix_task-003   │
-│     ...                  │
-└──────────────────────────┘
+┌──────────────────────────────────────────┐
+│ 🌐 网页对话 (15)                          │  ← 只数根节点
+│   新对话                                  │
+│   帮我重构 utils.py                       │
+│                                          │
+│   🤖 自动任务 ▾                           │
+│     eval-bench 批量测例构造  [26]         │  ← 蓝色徽章
+│       ▸ 收起 26 个子 session              │
+│         dispatch_...gen1                 │
+│         worker_...A10            [5]     │  ← 子 session 也可有后代
+│         ...                              │
+│     eval-bench QA R2 修复        [12]     │
+│       ▸ 展开 12 个子 session              │
+└──────────────────────────────────────────┘
 ```
 
-#### 2. 实现方案
+### 改动范围（合并）
 
-**纯前端改动**，不需要修改后端 API。
+| 文件 | 改动 | Phase |
+|------|------|-------|
+| `webserver.py` | `GET/PUT /api/sessions/parents` 路由 | 42 |
+| `frontend/src/services/api.ts` | `fetchSessionParents()` API | 42 |
+| `frontend/src/store/sessionStore.ts` | `parentMap` 状态 + 加载逻辑 | 42 |
+| `frontend/src/pages/chat/Sidebar/SessionList.tsx` | API 子分组 + 树形结构 + 徽章 + 折叠面板 | 41+42 |
+| `frontend/src/pages/chat/Sidebar/Sidebar.module.css` | 子分组头 + 树形节点 + 徽章样式 | 41+42 |
 
-- `SessionList.tsx`：
-  - 在 `groupSessionsByChannel` 后，对 webchat 组进行二次拆分
-  - 新增 `isApiSession(sessionKey)` 辅助函数：冒号后非纯数字 → API session
-  - webchat 组拆分为 manual sessions（正常渲染）+ api sessions（子分组，默认折叠）
-  - 子分组头组件 `ApiSessionSubgroup`：显示 🤖 图标 + 计数 + 折叠/展开
+### 已知设计决策
 
-- `Sidebar.module.css`：
-  - 新增子分组头样式（`.apiSubgroupHeader`），比 channel 分组头更小更紧凑
-  - 子分组内 session 缩进一层
-
-**改动范围**：
-
-| 文件 | 改动 | 风险 |
-|------|------|------|
-| `frontend/src/pages/chat/Sidebar/SessionList.tsx` | webchat 子分组逻辑 + ApiSessionSubgroup 组件 | 🟢 安全 |
-| `frontend/src/pages/chat/Sidebar/Sidebar.module.css` | 子分组头样式 | 🟢 安全 |
-
-### Issue #48：API Session 父子关系树形展示
-
-**来源**：eval-bench 批量构造产生大量父子 session（dispatch → worker），平铺列表中难以识别层级关系。
-
-**需求**：
-1. 后端提供 `session_parents.json` 映射文件 + API（`GET /api/sessions/parents`）
-2. 前端基于映射文件 + subagent 启发式规则构建树形结构
-3. 根 session 显示蓝色后代数量徽章
-4. 子 session 可折叠/展开面板
-5. 分组标题计数只数根节点
-6. 支持多级嵌套递归渲染
-
-**改动范围**：
-
-| 文件 | 改动 | 风险 |
-|------|------|------|
-| `webserver.py` | `GET /api/sessions/parents` 路由 | 🟢 安全 |
-| `frontend/src/services/api.ts` | `fetchSessionParents()` API | 🟢 安全 |
-| `frontend/src/store/sessionStore.ts` | `parentMap` 状态 | 🟢 安全 |
-| `frontend/src/pages/chat/Sidebar/SessionList.tsx` | 树形结构全面重写 | 🟡 低风险 |
-| `frontend/src/pages/chat/Sidebar/Sidebar.module.css` | 树形节点样式 | 🟢 安全 |
+- **overflow 截断修复**：`sessionSummary` 的 `overflow:hidden` 会裁掉 `childBadge`，需用 `sessionSummaryText` span 包裹文本部分，徽章设 `flex-shrink: 0` 始终可见
+- **计数规则**：channel 分组标题的总数只数根节点，不算子 session
+- **映射文件兜底**：启发式规则无法覆盖的父子关系（如自定义命名的 session），通过 `session_parents.json` 手动标注
 
 ---
 
