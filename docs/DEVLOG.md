@@ -47,7 +47,7 @@
 | Phase 38: LLM 错误响应前端展示 | ✅ 已完成 | main |
 | Phase 39: Message 工具 fallback 显示 + 项目清理 | ✅ 已完成 | main |
 | Phase 40: Provider 配置热加载 + 默认模型配置 (Issue #44/#45/#46) | 🔜 进行中 | main |
-| Phase 41: API Session 前端辨识 (Issue #47 / Backlog #15 → B5) | 🔜 待开发 | main |
+| Phase 41: API Session 前端辨识 (Issue #47 / Backlog #15 → B5) | ✅ 已完成 | main |
 
 ---
 
@@ -1572,13 +1572,36 @@ webchat channel 下，session_key 冒号后部分：
 
 ### 任务清单
 
-- 🔜 **T41.1** `SessionList.tsx` — 新增 `isApiSession()` 辅助函数 + webchat 子分组逻辑
+- ✅ **T41.1** `SessionList.tsx` — 新增 `isApiSession()` 辅助函数 + webchat 子分组逻辑
   - 在 channel 分组后，对 webchat 组拆分为 manual + api 两部分
   - 新增 `ApiSessionSubgroup` 组件（🤖 自动任务，默认折叠）
   - 手动 session 正常渲染在分组头下方，api session 在子分组内
+  - `ChannelGroup` 接口扩展 `apiSessions` 字段
+  - `renderGroupSessions` 统一渲染逻辑（单/多分组复用）
 
-- **T41.2** `Sidebar.module.css` — 新增子分组头样式
-  - `.apiSubgroupHeader`：比 channel 分组头更小更紧凑
-  - 子分组内 session 可选缩进
+- ✅ **T41.2** `Sidebar.module.css` — 新增子分组头样式
+  - `.apiSubgroupHeader`：比 channel 分组头更小更紧凑（padding-left: 16px 缩进）
+  - `.apiSubgroupSessions`：padding-left: 8px 子分组内 session 缩进
+  - 字体/图标尺寸比 channel 分组头小一号
 
-- **T41.3** 前端构建 + 验证 + Git 提交
+- ✅ **T41.3** 前端构建 + 验证 + Git 提交
+  - TypeScript 编译通过
+  - Vite 构建通过（523 modules, 1.04s）
+  - Git commit: `d04d91c`
+
+### 识别规则实现
+
+```typescript
+function isApiSession(sessionKey: string): boolean {
+  // webchat:1772030778 → 纯数字 → 手动创建
+  // webchat:dispatch_1772696251_gen1 → 含非数字 → API 创建
+  const suffix = sessionKey.substring(sessionKey.indexOf(':') + 1);
+  return !/^\d+$/.test(suffix);
+}
+```
+
+### 改动文件
+- `frontend/src/pages/chat/Sidebar/SessionList.tsx` — isApiSession + ChannelGroup.apiSessions + ApiSessionSubgroup 组件 + renderGroupSessions 统一
+- `frontend/src/pages/chat/Sidebar/Sidebar.module.css` — .apiSubgroup* 样式
+- `docs/REQUIREMENTS.md` — §三十四 Issue #47 + Backlog #15 移除 + Backlog #17 新增
+- `docs/DEVLOG.md` — Phase 41 记录
