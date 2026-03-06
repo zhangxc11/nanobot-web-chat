@@ -1772,7 +1772,7 @@ def _handle_reload_provider(self):
 
 ---
 
-## 三十四、API Session 前端辨识与管理 (v4.6)
+## 三十四、API Session 前端辨识与管理 (v4.6~v4.7)
 
 > 2026-03-06 从 Backlog #15 提升为正式需求（对应 eval-bench 改进需求 B5）
 
@@ -1854,12 +1854,6 @@ def _handle_reload_provider(self):
 |------|------|------|
 | `frontend/src/pages/chat/Sidebar/SessionList.tsx` | webchat 子分组逻辑 + ApiSessionSubgroup 组件 | 🟢 安全 |
 | `frontend/src/pages/chat/Sidebar/Sidebar.module.css` | 子分组头样式 | 🟢 安全 |
-
----
-
-## 三十五、Session 树形结构展示 (v4.7)
-
-> 日期：2026-03-06
 
 ### Issue #48：API Session 父子关系树形展示
 

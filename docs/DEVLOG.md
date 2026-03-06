@@ -48,7 +48,7 @@
 | Phase 39: Message 工具 fallback 显示 + 项目清理 | ✅ 已完成 | main |
 | Phase 40: Provider 配置热加载 + 默认模型配置 (Issue #44/#45/#46) | 🔜 进行中 | main |
 | Phase 41: API Session 前端辨识 (Issue #47 / Backlog #15 → B5) | ✅ 已完成 | main |
-| Phase 42: Session 树形结构 (Issue #48) | ✅ 已完成 | main |
+| Phase 42: Session 树形结构 (§三十四 Issue #48) | ✅ 已完成 | main |
 
 ---
 
@@ -1619,7 +1619,7 @@ function isApiSession(sessionKey: string): boolean {
 
 ---
 
-## Phase 42: Session 树形结构 — 父子关系 + 折叠面板 + 徽章 (Issue #48)
+## Phase 42: Session 树形结构 — 父子关系 + 折叠面板 + 徽章 (§三十四 Issue #48)
 
 > 日期：2026-03-06
 > 需求：API session 支持父子关系树形展示，子 session 折叠在父 session 下方
