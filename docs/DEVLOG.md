@@ -49,6 +49,7 @@
 | Phase 40: Provider 配置热加载 + 默认模型配置 (Issue #44/#45/#46) | 🔜 进行中 | main |
 | Phase 41: API Session 前端辨识 (Issue #47 / Backlog #15 → B5) | ✅ 已完成 | main |
 | Phase 42: Session 树形结构 (§三十四 Issue #48) | ✅ 已完成 | main |
+| Phase 43: 三级树状父子关系 (§三十五 Issue #49) | ✅ 已完成 | main |
 
 ---
 
@@ -1726,3 +1727,63 @@ for (const candidate of allSessionKeys) {
 ### 改动文件
 - `frontend/src/pages/chat/Sidebar/SessionList.tsx` — resolveParent 跨通道搜索 + allSessionKeys 参数
 - `docs/REQUIREMENTS.md` — 启发式规则 B 描述更新为"跨通道搜索"
+
+---
+
+## Phase 43: 三级树状 Session 父子关系 (Issue #49)
+
+> 日期：2026-03-06
+> 需求：REQUIREMENTS.md §三十五 Issue #49
+> batch 调度场景下 session 父子关系从扁平化升级为三级树状结构
+
+### 需求概述
+
+batch-orchestrator 场景下，调度和 Worker 都扁平挂在主控下，无法区分哪些 Worker 属于哪个调度。
+需要体现三级树：主控 → 调度 → Worker。
+
+### 方案（G 方案）
+
+1. **调度 session 命名**：`webchat:dispatch_<主控ts>_<调度自身ts>`（含双 timestamp）
+2. **Worker session 命名**：`webchat:worker_<调度ts>_<detail>`（parent_ref 指向调度的 ts）
+3. **前端启发式规则 B 扩展**：提取 timestamp 后，先精确匹配 `endsWith(':' + ts)`，再后缀匹配 `endsWith('_' + ts)`
+
+### 任务清单
+
+- ✅ **T43.1** `SessionList.tsx` `resolveParent()` — 扩展启发式规则 B
+  - 新增 Priority b：`endsWith('_' + ts)` 后缀匹配
+  - 排除自身（`candidate !== sk`）避免自引用
+  - 注释更新说明三级树支持
+
+- ✅ **T43.2** `skills/web-subsession/SKILL.md` — 更新命名规范
+  - 新增"三级树状结构"章节，含完整示例
+  - 更新父子关系识别规则（精确匹配 + 后缀匹配）
+  - 更新文件名映射示例
+  - 更新跨通道使用示例
+  - 更新路径 A 和脚本工具示例
+
+- ✅ **T43.3** `skills/batch-orchestrator/SKILL.md` — 更新命名规范
+  - 角色分工图增加 session_key 格式说明
+  - §3 重写为三级树状结构，含调度和 Worker 命名格式
+  - 新增父子关系自动识别表（精确匹配 + 后缀匹配）
+  - 新增调度 ts 生成代码示例
+  - 更新跨通道使用说明
+
+- ✅ **T43.4** `docs/REQUIREMENTS.md` — 新增 §三十五 Issue #49
+
+- ✅ **T43.5** 前端构建通过
+  - TypeScript 编译 ✅
+  - Vite 构建 ✅ (523 modules, 998ms)
+
+- ✅ **T43.6** MEMORY.md 更新 + Git 提交
+
+### 向后兼容
+
+- 旧的扁平命名（`worker_<主控ts>_xxx`）仍能被精确匹配到主控，显示为扁平（不报错）
+- 新规则只增加了 `endsWith('_' + ts)` 备选搜索，不影响现有匹配
+
+### 改动文件
+- `frontend/src/pages/chat/Sidebar/SessionList.tsx` — resolveParent 扩展启发式规则 B
+- `skills/batch-orchestrator/SKILL.md` — 三级树状命名规范
+- `skills/web-subsession/SKILL.md` — 三级树状命名规范 + 跨通道更新
+- `docs/REQUIREMENTS.md` — §三十五 Issue #49
+- `docs/DEVLOG.md` — Phase 43 记录

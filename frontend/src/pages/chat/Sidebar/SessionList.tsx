@@ -98,8 +98,16 @@ function resolveParent(
   }
 
   // 3. Webchat API session heuristic: webchat:<role>_<10-digit-timestamp>_<detail>
-  //    Extract the 10-digit timestamp, then find any session ending with :<timestamp>
-  //    This supports cross-channel parents (cli:xxx, feishu.lab:xxx, webchat:xxx)
+  //    Extract the FIRST 10-digit timestamp, then search for parent session.
+  //    Search priority:
+  //      a) Exact: any session ending with :<timestamp> (e.g. webchat:1772696251, cli:1772696251)
+  //      b) Suffix: any session ending with _<timestamp> (e.g. webchat:dispatch_1772696251_1772700001)
+  //    This supports:
+  //      - Cross-channel parents (cli:xxx, feishu.lab:xxx, webchat:xxx)
+  //      - Three-level trees: master → dispatch → worker
+  //        dispatch key: webchat:dispatch_<master_ts>_<dispatch_ts>
+  //        worker key:   webchat:worker_<dispatch_ts>_<detail>
+  //        worker extracts dispatch_ts → matches dispatch ending with _<dispatch_ts>
   if (sk.startsWith('webchat:')) {
     const suffix = sk.substring('webchat:'.length);
     // Only for API sessions (suffix contains non-digit chars)
@@ -107,9 +115,16 @@ function resolveParent(
       const tsMatch = suffix.match(/_(\d{10})(?:_|$)/);
       if (tsMatch && allSessionKeys) {
         const ts = tsMatch[1];
-        // Search for any session whose key ends with :<timestamp>
+        // Priority a: exact match — session ending with :<timestamp>
         for (const candidate of allSessionKeys) {
           if (candidate.endsWith(':' + ts)) {
+            return candidate;
+          }
+        }
+        // Priority b: suffix match — session ending with _<timestamp>
+        // This enables three-level trees (worker → dispatch)
+        for (const candidate of allSessionKeys) {
+          if (candidate !== sk && candidate.endsWith('_' + ts)) {
             return candidate;
           }
         }

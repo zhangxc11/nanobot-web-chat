@@ -1868,6 +1868,69 @@ API session 之间存在父子关系，需要树形展示。
 
 ---
 
+## 三十五、三级树状 Session 父子关系 (v4.8)
+
+> 2026-03-06 从扁平化父子关系升级为三级树状结构
+
+### Issue #49：batch 调度场景下 session 父子关系应体现三级树状结构
+
+**现象**：
+1. batch-orchestrator 场景下，调度 session 和 Worker session 都直接挂在主控 session 下（扁平化）
+2. 无法区分哪些 Worker 属于哪个调度 session
+3. 当有多代调度时（gen1, gen2），Worker 混在一起，管理困难
+
+**期望**：体现三级树状结构：主控 → 调度 → Worker
+
+```
+主控 session (webchat:1772696251)
+├── 调度 gen1 (webchat:dispatch_1772696251_1772700001)
+│   ├── Worker task003 (webchat:worker_1772700001_task003)
+│   └── Worker task005 (webchat:worker_1772700001_task005)
+└── 调度 gen2 (webchat:dispatch_1772696251_1772700500)
+    ├── Worker task017 (webchat:worker_1772700500_task017)
+    └── Worker task020 (webchat:worker_1772700500_task020)
+```
+
+**解决方案**：
+
+#### 命名规范变更
+
+**调度 session**：key 中包含两个 10 位 timestamp
+```
+webchat:dispatch_<主控ts>_<调度自身ts>
+```
+
+**Worker session**：parent_ref 指向调度的 timestamp（而非主控的）
+```
+webchat:worker_<调度ts>_<detail>
+```
+
+#### 前端启发式规则 B 扩展
+
+`resolveParent()` 提取第一个 10 位 timestamp 后，搜索顺序：
+1. **精确匹配** `endsWith(':' + ts)` — 匹配根 session（如 `webchat:1772696251`）
+2. **后缀匹配** `endsWith('_' + ts)` — 匹配调度等中间层 session（如 `webchat:dispatch_1772696251_1772700001`）
+
+这样：
+- 调度 `dispatch_1772696251_1772700001` 提取 `1772696251` → 精确匹配 `webchat:1772696251` ✓
+- Worker `worker_1772700001_task003` 提取 `1772700001` → 精确无匹配 → 后缀匹配 `dispatch_..._1772700001` ✓
+
+#### 向后兼容
+
+- 旧的扁平命名（`worker_<主控ts>_xxx`）仍能被精确匹配到主控，只是显示为扁平（不报错）
+- 新规则只是增加了 `endsWith('_' + ts)` 的备选搜索，不影响现有匹配
+
+### 改动范围
+
+| 文件/Skill | 改动 |
+|-----------|------|
+| `SessionList.tsx` `resolveParent()` | 扩展启发式规则 B：增加 `endsWith('_' + ts)` 备选搜索 |
+| `skills/batch-orchestrator/SKILL.md` | 更新命名规范：调度 key 含双 timestamp，Worker parent_ref 指向调度 |
+| `skills/web-subsession/SKILL.md` | 更新命名规范：三级树状结构说明、跨通道使用更新 |
+| `MEMORY.md` | 更新启发式规则 B 描述 |
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
