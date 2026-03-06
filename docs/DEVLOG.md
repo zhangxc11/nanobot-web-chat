@@ -1601,7 +1601,17 @@ function isApiSession(sessionKey: string): boolean {
 ```
 
 ### 改动文件
-- `frontend/src/pages/chat/Sidebar/SessionList.tsx` — isApiSession + ChannelGroup.apiSessions + ApiSessionSubgroup 组件 + renderGroupSessions 统一
+- `frontend/src/pages/chat/Sidebar/SessionList.tsx` — isApiSession + ChannelGroup.apiSessions + ApiSessionSubgroup 组件 + renderGroupSessions 统一 + subagent channel 支持
 - `frontend/src/pages/chat/Sidebar/Sidebar.module.css` — .apiSubgroup* 样式
 - `docs/REQUIREMENTS.md` — §三十四 Issue #47 + Backlog #15 移除 + Backlog #17 新增
 - `docs/DEVLOG.md` — Phase 41 记录
+
+### nanobot 核心联动改动
+- `nanobot/agent/subagent.py` — subagent session key 格式从 `subagent:{task_id}` 改为 `subagent:{parent_key_sanitized}_{task_id}`
+- `docs/REQUIREMENTS.md` §二十四 — 更新 persist session key 格式说明
+- `docs/ARCHITECTURE.md` §十一 — 更新 session key 格式和依赖关系表
+- nanobot commit: `f2d456f`
+
+### Git
+- web-chat commits: `d04d91c` (main feature), `0532e61` (subagent channel)
+- nanobot commit: `f2d456f` (subagent session key format)
