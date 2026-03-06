@@ -51,7 +51,8 @@ interface ChannelGroup {
   key: string;
   label: string;
   icon: string;
-  sessions: Session[];
+  sessions: Session[];       // manual sessions (or all for non-webchat)
+  apiSessions: Session[];    // API-created sessions (webchat only)
 }
 
 const CHANNEL_CONFIG: Record<string, { label: string; icon: string; order: number }> = {
@@ -75,6 +76,17 @@ function getChannel(sessionKey: string): string {
   return CHANNEL_CONFIG[base] ? base : 'other';
 }
 
+/** Check if a webchat session is API-created (non-numeric part after colon) */
+function isApiSession(sessionKey: string): boolean {
+  if (!sessionKey) return false;
+  const colonIdx = sessionKey.indexOf(':');
+  if (colonIdx < 0) return false;
+  const suffix = sessionKey.substring(colonIdx + 1);
+  // Pure numeric = manual (e.g. "webchat:1772030778")
+  // Non-numeric = API-created (e.g. "webchat:dispatch_1772696251_gen1")
+  return !/^\d+$/.test(suffix);
+}
+
 /** Group sessions by channel, preserving sort order within each group */
 function groupSessionsByChannel(sessions: Session[]): ChannelGroup[] {
   const groupMap = new Map<string, Session[]>();
@@ -90,12 +102,34 @@ function groupSessionsByChannel(sessions: Session[]): ChannelGroup[] {
   const groups: ChannelGroup[] = [];
   for (const [key, groupSessions] of groupMap) {
     const config = CHANNEL_CONFIG[key] || CHANNEL_CONFIG.other;
-    groups.push({
-      key,
-      label: config.label,
-      icon: config.icon,
-      sessions: groupSessions, // already sorted by lastActiveAt from backend
-    });
+
+    // For webchat channel, split into manual vs API sessions
+    if (key === 'webchat') {
+      const manual: Session[] = [];
+      const api: Session[] = [];
+      for (const s of groupSessions) {
+        if (isApiSession(s.sessionKey || '')) {
+          api.push(s);
+        } else {
+          manual.push(s);
+        }
+      }
+      groups.push({
+        key,
+        label: config.label,
+        icon: config.icon,
+        sessions: manual,
+        apiSessions: api,
+      });
+    } else {
+      groups.push({
+        key,
+        label: config.label,
+        icon: config.icon,
+        sessions: groupSessions,
+        apiSessions: [],
+      });
+    }
   }
 
   // Sort groups: webchat first, then by configured order
@@ -236,9 +270,59 @@ function ChannelGroupHeader({
   );
 }
 
+function ApiSessionSubgroup({
+  sessions,
+  collapsed,
+  onToggle,
+  activeSessionId,
+  onSelect,
+  onRename,
+  onDelete,
+}: {
+  sessions: Session[];
+  collapsed: boolean;
+  onToggle: () => void;
+  activeSessionId: string | null;
+  onSelect: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  if (sessions.length === 0) return null;
+  return (
+    <div className={styles.apiSubgroup}>
+      <div className={styles.apiSubgroupHeader} onClick={onToggle}>
+        <span className={styles.apiSubgroupArrow}>{collapsed ? '▸' : '▾'}</span>
+        <span className={styles.apiSubgroupIcon}>🤖</span>
+        <span className={styles.apiSubgroupLabel}>自动任务</span>
+        <span className={styles.apiSubgroupCount}>{sessions.length}</span>
+      </div>
+      {!collapsed && (
+        <div className={styles.apiSubgroupSessions}>
+          {sessions.map((session) => (
+            <SessionItem
+              key={session.id}
+              id={session.id}
+              summary={session.summary}
+              filename={session.filename || session.id + '.jsonl'}
+              sessionKey={session.sessionKey || ''}
+              lastActiveAt={session.lastActiveAt}
+              messageCount={session.messageCount}
+              isActive={session.id === activeSessionId}
+              onClick={() => onSelect(session.id)}
+              onRename={onRename}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SessionList() {
   const { sessions, activeSessionId, setActiveSession, loading, error, fetchSessions, renameSession, deleteSession } = useSessionStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [apiCollapsed, setApiCollapsed] = useState<boolean>(true); // API sessions default collapsed
 
   const groups = useMemo(() => groupSessionsByChannel(sessions), [sessions]);
 
@@ -282,61 +366,64 @@ export default function SessionList() {
     );
   }
 
+  const renderSessionItem = (session: Session) => (
+    <SessionItem
+      key={session.id}
+      id={session.id}
+      summary={session.summary}
+      filename={session.filename || session.id + '.jsonl'}
+      sessionKey={session.sessionKey || ''}
+      lastActiveAt={session.lastActiveAt}
+      messageCount={session.messageCount}
+      isActive={session.id === activeSessionId}
+      onClick={() => setActiveSession(session.id)}
+      onRename={handleRename}
+      onDelete={handleDelete}
+    />
+  );
+
+  const renderGroupSessions = (group: ChannelGroup, showGroupHeader: boolean) => (
+    <div key={group.key} className={styles.channelGroup}>
+      {showGroupHeader && (
+        <ChannelGroupHeader
+          icon={group.icon}
+          label={group.label}
+          count={group.sessions.length + group.apiSessions.length}
+          collapsed={!!collapsedGroups[group.key]}
+          onToggle={() => toggleGroup(group.key)}
+        />
+      )}
+      {(!showGroupHeader || !collapsedGroups[group.key]) && (
+        <div className={styles.channelGroupSessions}>
+          {group.sessions.map(renderSessionItem)}
+          {group.apiSessions.length > 0 && (
+            <ApiSessionSubgroup
+              sessions={group.apiSessions}
+              collapsed={apiCollapsed}
+              onToggle={() => setApiCollapsed((prev) => !prev)}
+              activeSessionId={activeSessionId}
+              onSelect={setActiveSession}
+              onRename={handleRename}
+              onDelete={handleDelete}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   // If only one group, don't show group headers (cleaner look)
   if (groups.length === 1) {
     return (
       <div className={styles.sessionListContainer}>
-        {groups[0].sessions.map((session) => (
-          <SessionItem
-            key={session.id}
-            id={session.id}
-            summary={session.summary}
-            filename={session.filename || session.id + '.jsonl'}
-            sessionKey={session.sessionKey || ''}
-            lastActiveAt={session.lastActiveAt}
-            messageCount={session.messageCount}
-            isActive={session.id === activeSessionId}
-            onClick={() => setActiveSession(session.id)}
-            onRename={handleRename}
-            onDelete={handleDelete}
-          />
-        ))}
+        {renderGroupSessions(groups[0], false)}
       </div>
     );
   }
 
   return (
     <div className={styles.sessionListContainer}>
-      {groups.map((group) => (
-        <div key={group.key} className={styles.channelGroup}>
-          <ChannelGroupHeader
-            icon={group.icon}
-            label={group.label}
-            count={group.sessions.length}
-            collapsed={!!collapsedGroups[group.key]}
-            onToggle={() => toggleGroup(group.key)}
-          />
-          {!collapsedGroups[group.key] && (
-            <div className={styles.channelGroupSessions}>
-              {group.sessions.map((session) => (
-                <SessionItem
-                  key={session.id}
-                  id={session.id}
-                  summary={session.summary}
-                  filename={session.filename || session.id + '.jsonl'}
-                  sessionKey={session.sessionKey || ''}
-                  lastActiveAt={session.lastActiveAt}
-                  messageCount={session.messageCount}
-                  isActive={session.id === activeSessionId}
-                  onClick={() => setActiveSession(session.id)}
-                  onRename={handleRename}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+      {groups.map((group) => renderGroupSessions(group, true))}
     </div>
   );
 }

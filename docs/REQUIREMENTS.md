@@ -1770,8 +1770,130 @@ def _handle_reload_provider(self):
 
 ---
 
+---
+
+## 三十四、API Session 前端辨识与管理 (v4.6)
+
+> 2026-03-06 从 Backlog #15 提升为正式需求（对应 eval-bench 改进需求 B5）
+
+### Issue #47：API 程序化创建的 Session 与手动 Session 混在一起，无法区分
+
+**现象**：
+1. eval-bench 批量构造产生了 54 个 API 创建的 session（dispatch/worker/qa_r2_fix 等），与 71 个手动 session 混在 🌐 网页对话 分组中
+2. 前端 session 列表无法区分哪些是用户手动创建的、哪些是 API 程序化创建的
+3. 批量 session 淹没了手动 session，查找日常对话困难
+
+**背景**：
+- 通过 curl POST worker API 可创建任意 session_key 的 session（调度 session、worker session 等）
+- 这些 session 的 session_key 遵循命名规范：`webchat:<role>_<parent_ref>_<detail>`
+- Phase 35 已实现按 channel 分组（webchat/cli/feishu 等），现在需要在 webchat 组内进一步区分
+
+**API Session 命名模式**（已有数据）：
+
+| 模式 | 示例 | 说明 |
+|------|------|------|
+| `webchat:dispatch_*` | `webchat:dispatch_1772696251_gen1` | 调度 session |
+| `webchat:worker_*` | `webchat:worker_1772696251_A10` | Worker session |
+| `webchat:qa_r2_dispatch_*` | `webchat:qa_r2_dispatch_1` | QA 调度 session |
+| `webchat:qa_r2_fix_*` | `webchat:qa_r2_fix_task-003` | QA 修复 session |
+| `webchat:<timestamp>` | `webchat:1772030778` | 手动创建（纯数字） |
+
+**识别规则**：webchat channel 下，session_key 冒号后部分如果是纯数字（timestamp），则为手动创建；否则为 API 创建。
+
+**解决方案**：
+
+#### 1. 前端 webchat 分组内子分组
+
+在 🌐 网页对话 分组内，将 session 分为两个子组：
+- **手动对话**：session_key 冒号后为纯数字（如 `webchat:1772030778`）
+- **🤖 自动任务**：session_key 冒号后包含非数字字符（如 `webchat:dispatch_*`, `webchat:worker_*`）
+
+**渲染示例**：
+```
+┌──────────────────────────┐
+│ 🌐 网页对话 (125)         │  ← channel 分组头
+│   新对话                  │  ← 手动 session（正常显示）
+│   帮我重构 utils.py       │
+│   查看明天日程            │
+│   ...                    │
+│                          │
+│   🤖 自动任务 (54) ▸      │  ← 子分组头（默认折叠）
+│                          │
+│ 💬 飞书 (8)               │
+│   ...                    │
+└──────────────────────────┘
+
+展开 🤖 自动任务：
+┌──────────────────────────┐
+│   🤖 自动任务 (54) ▾      │  ← 展开
+│     dispatch_...gen1     │
+│     dispatch_...gen2     │
+│     worker_...A10        │
+│     qa_r2_fix_task-003   │
+│     ...                  │
+└──────────────────────────┘
+```
+
+#### 2. 实现方案
+
+**纯前端改动**，不需要修改后端 API。
+
+- `SessionList.tsx`：
+  - 在 `groupSessionsByChannel` 后，对 webchat 组进行二次拆分
+  - 新增 `isApiSession(sessionKey)` 辅助函数：冒号后非纯数字 → API session
+  - webchat 组拆分为 manual sessions（正常渲染）+ api sessions（子分组，默认折叠）
+  - 子分组头组件 `ApiSessionSubgroup`：显示 🤖 图标 + 计数 + 折叠/展开
+
+- `Sidebar.module.css`：
+  - 新增子分组头样式（`.apiSubgroupHeader`），比 channel 分组头更小更紧凑
+  - 子分组内 session 缩进一层
+
+**改动范围**：
+
+| 文件 | 改动 | 风险 |
+|------|------|------|
+| `frontend/src/pages/chat/Sidebar/SessionList.tsx` | webchat 子分组逻辑 + ApiSessionSubgroup 组件 | 🟢 安全 |
+| `frontend/src/pages/chat/Sidebar/Sidebar.module.css` | 子分组头样式 | 🟢 安全 |
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
 
-（当前无待处理 backlog）
+#### Backlog #17：API 子 Session 命名规范 Skill
+
+**来源**: B5 开发过程中用户提出 (2026-03-06)
+
+**背景**:
+- 当前 API 创建的子 session 命名是约定俗成的（如 `webchat:dispatch_*`, `webchat:worker_*`）
+- 缺少一个正式的 skill 来制定和强制执行命名规则
+- 后续批量构造、调度等场景需要统一的命名规范
+
+**需求**:
+1. 创建一个 skill，定义通过 API 创建子 session 的命名规则
+2. 规范格式：`webchat:<role>_<parent_ref>_<detail>`
+3. 定义合法的 role 列表（dispatch, worker, review, fix 等）
+4. 提供命名校验函数/工具
+
+**优先级**: 低（B5 前端辨识完成后再制定）
+
+#### Backlog #16：message tool 跨 Session 消息传递
+
+**来源**: eval-bench 批量测例构造设计 (2026-03-05)
+
+**背景**:
+- 当前 message tool 只能向当前 session 的用户发送消息
+- 调度 session / review session 完成后需要通知主 session
+- 当前只能通过文件系统间接协调，主 session 需要手动检查进度
+
+**需求**:
+1. **扩展 message tool**: 增加 `target_session` 参数，支持向指定 session 发送跨 session 消息
+2. **实现机制**: 通过 `MessageBus.publish_inbound(InboundMessage(channel="system"))` 注入目标 session
+3. **安全限制**: `target_session` 只允许 `web:*` 和 `webchat:*` channel
+4. **消息标识**: sender_id 标记来源 session，content 加前缀标识跨 session 消息
+5. **代码改动**: `agent/tools/message.py` (~30行) + `agent/loop.py` (传入 bus 引用)
+
+**涉及仓库**: nanobot 核心仓库 (非 web-chat)
+**优先级**: 中（eval-bench 批量构造 Phase 3 迭代时实现）
+**详细设计**: `eval-bench-data/batch_build/DESIGN.md` §4.2

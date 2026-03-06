@@ -364,6 +364,64 @@
   gap: 2px;
 }
 
+/* ── API Session Subgroup (within webchat channel) ── */
+
+.apiSubgroup {
+  margin-top: 2px;
+}
+
+.apiSubgroupHeader {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 8px 4px 16px;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.apiSubgroupHeader:hover {
+  background: var(--bg-hover);
+}
+
+.apiSubgroupArrow {
+  font-size: 9px;
+  color: var(--text-muted);
+  width: 10px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.apiSubgroupIcon {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.apiSubgroupLabel {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.apiSubgroupCount {
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 0px 5px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.apiSubgroupSessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 8px;
+}
+
 /* ── Session List ── */
 
 .sessionListContainer {
