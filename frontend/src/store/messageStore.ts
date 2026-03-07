@@ -299,12 +299,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             return;
           }
 
-          // Unknown slash command
+          // Unknown slash command — restore input for easy editing
           set((s) => ({
             messages: [...s.messages, _makeSystemMsg(
               `未知命令: ${cmd}\n\n输入 /help 查看可用命令。`
             )],
           }));
+          // Restore original input to draft so user can edit and resend
+          get().setDraft(sessionId, content);
           return;
         }
       }

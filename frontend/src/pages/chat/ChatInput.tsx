@@ -58,9 +58,10 @@ export default function ChatInput() {
   }, []);
 
   // Adjust textarea height when switching sessions (draft text may differ in length)
+  // Also re-adjust when text changes externally (e.g., draft restored after unknown slash command)
   useEffect(() => {
     requestAnimationFrame(() => adjustHeight());
-  }, [activeSessionId, adjustHeight]);
+  }, [activeSessionId, text, adjustHeight]);
 
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     if (activeSessionId) {

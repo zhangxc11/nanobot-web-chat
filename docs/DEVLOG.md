@@ -50,6 +50,7 @@
 | Phase 41: API Session 前端辨识 (Issue #47 / Backlog #15 → B5) | ✅ 已完成 | main |
 | Phase 42: Session 树形结构 (§三十四 Issue #48) | ✅ 已完成 | main |
 | Phase 43: 三级树状父子关系 (§三十五 Issue #49) | ✅ 已完成 | main |
+| Phase 44: 斜杠命令失败后输入回填 (§三十六 Issue #50) | ✅ 已完成 | main |
 
 ---
 
@@ -1232,6 +1233,30 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 - `docs/REQUIREMENTS.md` — §二十九 Issue #40
 - `docs/ARCHITECTURE.md` — §十五 斜杠命令系统
 - `docs/DEVLOG.md` — Phase 33 记录
+
+---
+
+## Phase 44: 斜杠命令失败后输入回填 (Issue #50)
+
+> 日期：2026-03-07
+> 需求：REQUIREMENTS.md §三十六 Issue #50
+> 纯前端改动（🟢 安全），不涉及后端
+
+### 需求概述
+
+用户输入以 `/` 开头的非命令内容（如文件路径），被 slash 命令系统识别为未知命令后，输入框已被清空。需要在未知命令时回填原始输入，方便用户修改后重新发送。
+
+### 任务清单
+
+- ✅ **T44.1** `messageStore.ts` — unknown command 分支回填 draft
+  - 在 `default` (unknown slash command) 分支中，显示错误提示后调用 `get().setDraft(sessionId, content)` 回填原始输入
+- ✅ **T44.2** `ChatInput.tsx` — draft 变化时重新计算 textarea 高度
+  - `adjustHeight` useEffect 依赖数组增加 `text`，确保 draft 回填后 textarea 高度正确调整
+- ✅ **T44.3** 前端构建 + 验证 + Git 提交
+
+### 改动文件
+- `frontend/src/store/messageStore.ts` — unknown command 分支 `setDraft()` 回填
+- `frontend/src/pages/chat/ChatInput.tsx` — adjustHeight useEffect 增加 `text` 依赖
 
 ---
 

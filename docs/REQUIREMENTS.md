@@ -1931,6 +1931,36 @@ webchat:worker_<调度ts>_<detail>
 
 ---
 
+## 三十六、斜杠命令失败后输入回填 (v4.9)
+
+> 2026-03-07 斜杠命令体验优化
+
+### Issue #50：未知斜杠命令执行失败后输入框被清空，需重新输入
+
+**现象**：
+1. 用户在输入框中输入以 `/` 开头的非命令内容（如文件路径 `/Users/zhangxingcheng/...`）
+2. 被斜杠命令系统识别为"未知命令"，显示错误提示 "未知命令: /users"
+3. 但输入框已被 ChatInput 的 `handleSend()` 提前清空（`setDraft(activeSessionId, '')`）
+4. 用户需要重新输入完整内容，体验不佳
+
+**期望**：
+1. 斜杠命令执行失败（未知命令）时，将原始输入内容**回填到输入框**
+2. 用户可以直接在输入框中修改（如删掉开头的 `/`），而不是从头重新输入
+3. 已知命令（`/help`, `/stop`, `/new`, `/flush`, `/provider`）执行成功后仍然清空输入框
+
+**解决方案**：
+- `messageStore.sendMessage()` 在 "Unknown slash command" 分支中，调用 `get().setDraft(sessionId, content)` 将原始输入回填到 draft
+- ChatInput 已通过 `draftBySession` 绑定输入框内容，回填 draft 后输入框自动显示原始内容
+- textarea 高度需要在回填后重新计算（通过 `adjustHeight()` 或 `requestAnimationFrame`）
+
+**改动范围**：
+| 文件 | 改动 | 风险 |
+|------|------|------|
+| `messageStore.ts` | unknown command 分支回填 draft | 🟢 安全 |
+| `ChatInput.tsx` | draft 变化时重新计算 textarea 高度 | 🟢 安全 |
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
