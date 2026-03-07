@@ -109,6 +109,25 @@ def _has_running_tasks() -> bool:
         return any(t['status'] == 'running' for t in _tasks.values())
 
 
+# ── Subagent Task Keeper ──
+# Module-level set that holds strong references to subagent asyncio.Tasks.
+# Without this, when a web worker request's AgentLoop/SubagentManager is GC'd
+# after process_direct() returns, the subagent tasks lose their only strong
+# reference and get cancelled by the GC.
+_subagent_tasks: set[asyncio.Task] = set()
+
+
+def _keep_subagent_task(task: asyncio.Task) -> None:
+    """Register a subagent task in the module-level set to prevent GC."""
+    _subagent_tasks.add(task)
+
+    def _remove(t: asyncio.Task) -> None:
+        _subagent_tasks.discard(t)
+
+    task.add_done_callback(_remove)
+    logger.debug(f"Subagent task registered in keeper (total: {len(_subagent_tasks)})")
+
+
 # ── AgentRunner factory — one runner per task for concurrency safety ──
 # Each concurrent task gets its own AgentRunner with independent tool context,
 # so that _set_tool_context() in one task doesn't clobber another.
@@ -167,6 +186,7 @@ def _create_runner():
         usage_recorder=usage_recorder,
         detail_logger=detail_logger,
         audit_logger=audit_logger,
+        subagent_task_keeper=_keep_subagent_task,
     )
 
     runner = AgentRunner(agent_loop)
