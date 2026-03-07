@@ -1961,6 +1961,72 @@ webchat:worker_<调度ts>_<detail>
 
 ---
 
+## 三十七、restart.sh 进程发现与健康检查修复 (v4.10)
+
+> 2026-03-08 运维脚本鲁棒性修复
+
+### Issue #51 (Bug)：restart.sh 的 pgrep 匹配模式与实际进程命令行不一致，导致重启静默失败
+
+**现象**：
+1. 在新电脑上执行 `restart.sh all` 重启服务
+2. 脚本报告 ✅ healthy，但实际上是老进程在响应，新进程因端口占用启动失败
+3. 老进程的代码未更新，用户以为重启成功但实际运行的是旧版本
+
+**根因分析**：
+
+`restart.sh` 的 stop 函数使用 pgrep 匹配模式：
+```bash
+pgrep -f "webserver.py.*--port 8081"
+pgrep -f "worker.py.*--port 8082"
+```
+
+但实际运行的进程命令行中不包含 `--port` 参数（使用默认端口启动），导致：
+1. pgrep 匹配不到任何进程 → 脚本认为"not running" → 跳过 kill
+2. 新进程启动 → 端口被老进程占用 → 新进程静默失败退出
+3. 健康检查 curl 打到老进程 → 端口仍有响应 → 报告 ✅ healthy → **假象重启成功**
+
+**修复方案**（三层防护）：
+
+#### 1. 进程发现鲁棒化
+
+替换脆弱的 pgrep 模式匹配，改为两层发现策略：
+
+| 优先级 | 方法 | 匹配模式 |
+|--------|------|---------|
+| 1 | pgrep -f（脚本路径） | `${SCRIPT_DIR}/${script_name}` |
+| 2 | pgrep -f（进程名 fallback） | `[Pp]ython[3]?.*${script_name}` |
+| 3 | lsof -ti（端口占用） | 查找监听指定端口的进程 |
+
+合并去重后统一 kill，不再依赖命令行参数匹配。
+
+#### 2. Stop 后端口释放验证
+
+kill 进程后，额外检查端口是否已释放：
+- 通过 `lsof -ti :${port}` 确认端口无进程监听
+- 如果仍被占用，报错并提示手动 kill
+
+#### 3. 健康检查增加进程年龄验证
+
+健康检查不再仅靠 curl 响应判断成功，额外验证：
+- 通过 `lsof` 找到端口对应的 PID
+- 通过 `ps -o etime=` 获取进程运行时长
+- 如果进程年龄 > 10 秒（`NEW_PROCESS_MAX_AGE`），说明是老进程在响应 → **报错**
+- 只有进程年龄 ≤ 10 秒才认为是新启动的进程 → 报告成功
+
+**错误报告示例**：
+```
+❌ ERROR: Port 8081 responds but process is OLD (pid: 77066, age: 4572s)
+   This means the new process failed to start (port already occupied by stale process).
+   Run './restart.sh stop' first, then retry.
+```
+
+**改动范围**：
+| 文件 | 改动 | 风险 |
+|------|------|------|
+| `restart.sh` | 进程发现 + stop 验证 + 健康检查年龄验证 | 🟢 安全（运维脚本） |
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
