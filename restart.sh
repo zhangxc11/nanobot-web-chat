@@ -27,37 +27,165 @@ if [ -z "$NANOBOT_PYTHON" ]; then
 fi
 PYTHON="${NANOBOT_PYTHON:-python3}"
 
-stop_webserver() {
+# Max age in seconds for a process to be considered "newly started"
+NEW_PROCESS_MAX_AGE=10
+
+# --- Process discovery (robust matching) ---
+# Match any python process running webserver.py or worker.py under SCRIPT_DIR,
+# regardless of whether --port was passed on the command line.
+find_pids() {
+    local script_name="$1"
+    # pgrep -f matches the full command line; we match the script path or just the name
+    # Use lsof as fallback to find who's listening on the port
     local pids
-    pids=$(pgrep -f "webserver.py.*--port ${WEBSERVER_PORT}" 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "Stopping webserver (pid: $pids)..."
-        echo "$pids" | xargs kill 2>/dev/null || true
+    pids=$(pgrep -f "${SCRIPT_DIR}/${script_name}" 2>/dev/null || true)
+    if [ -z "$pids" ]; then
+        # Fallback: match just the script name (for cases launched from the dir)
+        pids=$(pgrep -f "[Pp]ython[3]?.*${script_name}" 2>/dev/null || true)
+    fi
+    echo "$pids"
+}
+
+# Find PID listening on a specific port (via lsof)
+find_pid_on_port() {
+    local port="$1"
+    lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null || true
+}
+
+# Get process elapsed time in seconds (macOS compatible)
+get_process_age_seconds() {
+    local pid="$1"
+    # macOS ps etime format: [[dd-]hh:]mm:ss
+    local etime
+    etime=$(ps -o etime= -p "$pid" 2>/dev/null | xargs) || return 1
+    [ -z "$etime" ] && return 1
+
+    local days=0 hours=0 minutes=0 seconds=0
+    # Remove leading/trailing whitespace
+    etime="${etime// /}"
+
+    if [[ "$etime" == *-* ]]; then
+        days="${etime%%-*}"
+        etime="${etime#*-}"
+    fi
+
+    # Split by ':'
+    IFS=':' read -ra parts <<< "$etime"
+    local n=${#parts[@]}
+    if [ "$n" -eq 3 ]; then
+        hours=$((10#${parts[0]}))
+        minutes=$((10#${parts[1]}))
+        seconds=$((10#${parts[2]}))
+    elif [ "$n" -eq 2 ]; then
+        minutes=$((10#${parts[0]}))
+        seconds=$((10#${parts[1]}))
+    elif [ "$n" -eq 1 ]; then
+        seconds=$((10#${parts[0]}))
+    fi
+
+    echo $(( days*86400 + hours*3600 + minutes*60 + seconds ))
+}
+
+stop_service() {
+    local name="$1"       # "webserver" or "worker"
+    local script="$2"     # "webserver.py" or "worker.py"
+    local port="$3"
+
+    # Strategy: find by process name first, then by port as fallback
+    local pids
+    pids=$(find_pids "$script")
+
+    # Also check who's listening on the port
+    local port_pids
+    port_pids=$(find_pid_on_port "$port")
+
+    # Merge and deduplicate
+    local all_pids
+    all_pids=$(echo -e "${pids}\n${port_pids}" | sort -u | grep -v '^$' || true)
+
+    if [ -n "$all_pids" ]; then
+        echo "Stopping ${name} (pids: $(echo $all_pids | tr '\n' ' '))..."
+        echo "$all_pids" | xargs kill 2>/dev/null || true
         sleep 0.5
+
         # Force kill if still running
-        pids=$(pgrep -f "webserver.py.*--port ${WEBSERVER_PORT}" 2>/dev/null || true)
-        if [ -n "$pids" ]; then
-            echo "$pids" | xargs kill -9 2>/dev/null || true
+        local remaining
+        remaining=$(echo "$all_pids" | while read -r p; do
+            kill -0 "$p" 2>/dev/null && echo "$p"
+        done || true)
+        if [ -n "$remaining" ]; then
+            echo "Force killing remaining: $remaining"
+            echo "$remaining" | xargs kill -9 2>/dev/null || true
+            sleep 0.3
         fi
+
+        # Final verification: is the port free now?
+        local still_on_port
+        still_on_port=$(find_pid_on_port "$port")
+        if [ -n "$still_on_port" ]; then
+            echo "❌ ERROR: Port ${port} still occupied by pid ${still_on_port} after kill!"
+            echo "   Command: $(ps -o command= -p $still_on_port 2>/dev/null || echo 'unknown')"
+            echo "   You may need to manually kill it: kill -9 ${still_on_port}"
+            return 1
+        fi
+        echo "${name} stopped."
     else
-        echo "Webserver not running."
+        echo "${name} not running."
     fi
 }
 
+stop_webserver() {
+    stop_service "Webserver" "webserver.py" "$WEBSERVER_PORT"
+}
+
 stop_worker() {
-    local pids
-    pids=$(pgrep -f "worker.py.*--port ${WORKER_PORT}" 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "Stopping worker (pid: $pids)..."
-        echo "$pids" | xargs kill 2>/dev/null || true
-        sleep 0.5
-        pids=$(pgrep -f "worker.py.*--port ${WORKER_PORT}" 2>/dev/null || true)
-        if [ -n "$pids" ]; then
-            echo "$pids" | xargs kill -9 2>/dev/null || true
+    stop_service "Worker" "worker.py" "$WORKER_PORT"
+}
+
+# Health check with process age verification
+# Ensures the healthy endpoint is served by a NEWLY started process, not a stale one.
+verify_health() {
+    local name="$1"
+    local port="$2"
+    local health_path="$3"
+    local max_wait=5
+    local waited=0
+
+    while [ "$waited" -lt "$max_wait" ]; do
+        if curl -s "http://127.0.0.1:${port}${health_path}" >/dev/null 2>&1; then
+            # Health endpoint responded — now verify it's a NEW process
+            local pid_on_port
+            pid_on_port=$(find_pid_on_port "$port")
+            if [ -n "$pid_on_port" ]; then
+                # Check each PID's age (there might be multiple from lsof)
+                local first_pid
+                first_pid=$(echo "$pid_on_port" | head -1)
+                local age
+                age=$(get_process_age_seconds "$first_pid" 2>/dev/null || echo "unknown")
+
+                if [ "$age" = "unknown" ]; then
+                    echo "✅ ${name} healthy at port ${port} (pid: ${first_pid}, age: unknown)"
+                    return 0
+                elif [ "$age" -le "$NEW_PROCESS_MAX_AGE" ]; then
+                    echo "✅ ${name} healthy at port ${port} (pid: ${first_pid}, age: ${age}s)"
+                    return 0
+                else
+                    echo "❌ ERROR: Port ${port} responds but process is OLD (pid: ${first_pid}, age: ${age}s)"
+                    echo "   This means the new process failed to start (port already occupied by stale process)."
+                    echo "   Run '$0 stop' first, then retry."
+                    return 1
+                fi
+            fi
+            # No PID found on port but curl succeeded? Unlikely, but accept it
+            echo "✅ ${name} healthy at port ${port}"
+            return 0
         fi
-    else
-        echo "Worker not running."
-    fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    echo "⚠️  ${name} started but health check failed after ${max_wait}s"
+    return 1
 }
 
 start_webserver() {
@@ -65,11 +193,7 @@ start_webserver() {
     cd "$SCRIPT_DIR"
     $PYTHON webserver.py --port "$WEBSERVER_PORT" --worker-url "$WORKER_URL" --daemonize
     sleep 0.5
-    if curl -s "http://127.0.0.1:${WEBSERVER_PORT}/api/health" >/dev/null 2>&1; then
-        echo "✅ Webserver healthy at http://127.0.0.1:${WEBSERVER_PORT}"
-    else
-        echo "⚠️  Webserver started but health check failed (may need a moment)"
-    fi
+    verify_health "Webserver" "$WEBSERVER_PORT" "/api/health"
 }
 
 start_worker() {
@@ -77,30 +201,36 @@ start_worker() {
     cd "$SCRIPT_DIR"
     $PYTHON worker.py --port "$WORKER_PORT" --daemonize
     sleep 0.5
-    if curl -s "http://127.0.0.1:${WORKER_PORT}/health" >/dev/null 2>&1; then
-        echo "✅ Worker healthy at http://127.0.0.1:${WORKER_PORT}"
-    else
-        echo "⚠️  Worker started but health check failed (may need a moment)"
-    fi
+    verify_health "Worker" "$WORKER_PORT" "/health"
 }
 
 show_status() {
     echo "=== nanobot Web Chat Services ==="
-    local ws_pids worker_pids
-    ws_pids=$(pgrep -f "webserver.py.*--port ${WEBSERVER_PORT}" 2>/dev/null || true)
-    worker_pids=$(pgrep -f "worker.py.*--port ${WORKER_PORT}" 2>/dev/null || true)
 
-    if [ -n "$ws_pids" ]; then
-        echo "Webserver: ✅ running (pid: $ws_pids, port: ${WEBSERVER_PORT})"
-    else
-        echo "Webserver: ❌ stopped"
-    fi
+    for entry in "Webserver:webserver.py:${WEBSERVER_PORT}" "Worker:worker.py:${WORKER_PORT}"; do
+        IFS=':' read -r name script port <<< "$entry"
+        local pids port_pid age_info=""
 
-    if [ -n "$worker_pids" ]; then
-        echo "Worker:    ✅ running (pid: $worker_pids, port: ${WORKER_PORT})"
-    else
-        echo "Worker:    ❌ stopped"
-    fi
+        pids=$(find_pids "$script")
+        port_pid=$(find_pid_on_port "$port")
+
+        # Merge
+        local all_pids
+        all_pids=$(echo -e "${pids}\n${port_pid}" | sort -u | grep -v '^$' || true)
+
+        if [ -n "$all_pids" ]; then
+            local first_pid
+            first_pid=$(echo "$all_pids" | head -1)
+            local age
+            age=$(get_process_age_seconds "$first_pid" 2>/dev/null || echo "?")
+            local cmd
+            cmd=$(ps -o command= -p "$first_pid" 2>/dev/null | head -c 80 || echo "?")
+            echo "${name}: ✅ running (pid: $(echo $all_pids | tr '\n' ' '), port: ${port}, age: ${age}s)"
+            echo "         cmd: ${cmd}"
+        else
+            echo "${name}: ❌ stopped"
+        fi
+    done
 }
 
 case "${1:-all}" in
