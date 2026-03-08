@@ -53,6 +53,7 @@
 | Phase 44: 斜杠命令失败后输入回填 (§三十六 Issue #50) | ✅ 已完成 | main |
 | Phase 45: restart.sh 进程发现与健康检查修复 (§三十七 Issue #51) | ✅ 已完成 | main |
 | Phase 46: Session Tag — done 标记与过滤 (§六 V1.3) | 🔜 进行中 | main |
+| Phase 47: Bug 修复 — 后端不可达时消息静默丢失 | ✅ 已完成 | main |
 
 ---
 
@@ -1259,6 +1260,47 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 ### 改动文件
 - `frontend/src/store/messageStore.ts` — unknown command 分支 `setDraft()` 回填
 - `frontend/src/pages/chat/ChatInput.tsx` — adjustHeight useEffect 增加 `text` 依赖
+
+---
+
+## Phase 47: Bug 修复 — 后端不可达时消息静默丢失 (2026-03-08)
+
+> 分支：`main`
+
+### 问题
+
+用户发送消息时后端正好在重启（webserver 宕机），fetch POST 直接失败。前端 `sendMessage` 的 catch 块中 `isConnectionError` 正则匹配到 `"Failed to fetch"` 后误入 poll recovery 分支（`_pollTaskStatus`），但消息从未到达后端，poll 毫无意义。poll 多次后超时放弃，显示"请刷新页面查看结果"。用户刷新后消息消失——**消息静默丢失**。
+
+### 根因
+
+`isConnectionError` 正则无差别匹配了两种不同性质的错误：
+1. **fetch 失败**（`"Failed to fetch"` / `"网络错误"`）— 消息未送达后端
+2. **SSE 中途断开**（`"SSE connection reset — task may still be running"`）— 消息已送达，任务可能仍在运行
+
+修改前两种错误都走 poll recovery 分支，但 fetch 失败时 poll 完全无意义。
+
+### 修复
+
+在 `sendMessage` 的 catch 块中，新增 `isSseDisconnect` 和 `isFetchFailure` 两个判断：
+
+- **`isSseDisconnect`**：错误消息匹配 `"SSE connection reset"` 或 `"task may still be running"` → 保持现有 poll recovery 行为不变
+- **`isFetchFailure`**：`isConnectionError && !isSseDisconnect` → 新行为：
+  - 回滚 optimistic update（移除前端临时添加的 `userMsg`）
+  - 重置 sending 状态，允许用户重新发送
+  - 显示明确的错误提示："消息发送失败（服务暂不可用），请稍后重试"
+
+### 副作用评估
+
+| 错误类型 | 修改前行为 | 修改后行为 | 影响 |
+|----------|-----------|-----------|------|
+| fetch 失败 | 静默丢失 + 无意义 poll | 提示重试 + 回滚 | ✅ 改善 |
+| SSE 断开 | poll recovery | poll recovery（不变） | ✅ 无影响 |
+| HTTP 错误 | 直接显示错误 | 直接显示错误（不变） | ✅ 无影响 |
+| 业务错误 | 直接显示错误 | 直接显示错误（不变） | ✅ 无影响 |
+
+### 改动文件
+- `frontend/src/store/messageStore.ts` — sendMessage catch 块区分 fetch 失败 vs SSE 断开
+- `docs/DEVLOG.md` — Phase 47 记录
 
 ---
 

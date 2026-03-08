@@ -376,7 +376,31 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       // Check if this looks like a connection/transport error (not a business error)
       const isConnectionError = /fetch|network|abort|reset|refused|timeout|timed|connection|running/i.test(errorMsg);
 
-      if (isConnectionError) {
+      // Distinguish between two types of connection errors:
+      // 1. SSE mid-stream disconnect: message WAS delivered, task may still be running → poll recovery
+      //    Error: "SSE connection reset — task may still be running"
+      // 2. Fetch failure: message NEVER reached backend → rollback optimistic update, prompt retry
+      //    Error: "Failed to fetch" / "网络错误" / "NetworkError" etc.
+      const isSseDisconnect = /SSE connection reset|task may still be running/i.test(errorMsg);
+      const isFetchFailure = isConnectionError && !isSseDisconnect;
+
+      if (isFetchFailure) {
+        // Fetch itself failed — message never reached the backend.
+        // Rollback the optimistic user message and reset state.
+        console.warn(`Fetch failed for ${sessionId}: message not delivered, rolling back.`);
+        set((s) => ({
+          messages: s.messages.filter((m) => m.id !== userMsg.id),
+          ..._updateTask(s, sessionId, {
+            sending: false,
+            progressSteps: [],
+            recovering: false,
+            abortController: null,
+          }),
+          error: '⚠️ 消息发送失败（服务暂不可用），请稍后重试',
+        }));
+      } else if (isConnectionError) {
+        // SSE mid-stream disconnect — message was delivered, task may still be running.
+        // Enter poll recovery to wait for task completion.
         set((s) => _updateTask(s, sessionId, { recovering: true, abortController: null }));
         set({ error: null });
         const recovered = await _pollTaskStatus(sessionId, set);
