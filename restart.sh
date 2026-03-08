@@ -28,7 +28,7 @@ fi
 PYTHON="${NANOBOT_PYTHON:-python3}"
 
 # Max age in seconds for a process to be considered "newly started"
-NEW_PROCESS_MAX_AGE=10
+NEW_PROCESS_MAX_AGE=15
 
 # --- Process discovery (robust matching) ---
 # Match any python process running webserver.py or worker.py under SCRIPT_DIR,
@@ -148,7 +148,7 @@ verify_health() {
     local name="$1"
     local port="$2"
     local health_path="$3"
-    local max_wait=5
+    local max_wait=12
     local waited=0
 
     while [ "$waited" -lt "$max_wait" ]; do
