@@ -343,7 +343,7 @@ nanobot 的消息流中，工具调用产生多条 JSONL 记录：
 }
 ```
 
-**摘要生成逻辑**：优先使用 `custom_name`，其次读取第一条 `role: user` 消息的 content 前 80 字符（过滤 `[Runtime Context]`），最后回退到 session_id。
+**摘要生成逻辑**：优先使用 `session_names.json` 中的自定义名称，其次读取第一条 `role: user` 消息的 content 前 80 字符（过滤 `[Runtime Context]`），最后回退到 session_id。`session_names.json` 独立于 JSONL 文件，避免 nanobot `session.save()` 覆盖导致的竞态问题。
 
 #### GET `/api/sessions/:id/messages?limit=30&before=<timestamp>`
 
@@ -1551,13 +1551,14 @@ store/providerStore.ts (新增)
 
 ```
 ~/.nanobot/workspace/sessions/
+├── session_names.json      # 已有：自定义显示名称映射 { "session_id": "显示名称" }
 ├── session_parents.json    # 已有：父子关系映射
 ├── session_tags.json       # 新增：tag 映射
 │   格式: { "session_key": ["done"], ... }
 └── *.jsonl                 # session 对话数据（不修改）
 ```
 
-设计理由：Tag 是 UI 管理概念，不属于对话内容，使用独立文件与 `session_parents.json` 模式一致。
+设计理由：Tag、名称、父子关系都是 UI 管理概念，不属于对话内容，使用独立 JSON 文件避免与 nanobot `session.save()` 竞态。
 
 ### 17.2 后端 API
 

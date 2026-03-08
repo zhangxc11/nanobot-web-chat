@@ -52,7 +52,7 @@
 | Phase 43: 三级树状父子关系 (§三十五 Issue #49) | ✅ 已完成 | main |
 | Phase 44: 斜杠命令失败后输入回填 (§三十六 Issue #50) | ✅ 已完成 | main |
 | Phase 45: restart.sh 进程发现与健康检查修复 (§三十七 Issue #51) | ✅ 已完成 | main |
-| Phase 46: Session Tag — done 标记与过滤 (§六 V1.3) | 🔜 进行中 | main |
+| Phase 46: Session Tag — done 标记与过滤 (§六 V1.3) | ✅ 已完成 | main |
 | Phase 47: Bug 修复 — 后端不可达时消息静默丢失 | ✅ 已完成 | main |
 
 ---
@@ -323,6 +323,8 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 ---
 
 ## Phase 13.1: Bug 修复 — Session 重命名发消息后被恢复
+
+> ⚠️ **此方案已被 Phase 46.0 替代**：Phase 46.0 将 custom_name 从 JSONL 完全剥离到独立的 `session_names.json`，彻底解决竞态问题。
 
 ### 问题
 - 用户重命名 session 后，发送新消息，session 标题被恢复成原始标题（第一条用户消息内容）
@@ -1918,6 +1920,48 @@ Worker: ✅ running (pid: 65784, port: 8082, age: 53671s)
 
 ### Git
 - web-chat commit: `9fe6b8b` (restart.sh 修复) + pending (文档补全)
+
+---
+
+## Phase 46.0: Session 重命名存储重构 — session_names.json (2026-03-08)
+
+> 分支：`main`（与 Phase 46 同 commit `924c345`）
+
+### 问题
+
+Session 重命名后发消息，名称被恢复为原始标题。这是 Phase 13.1 修复过的问题的**再次复发**。
+
+### 根因
+
+Phase 13.1 的修复方案是同时将 `custom_name` 写入 JSONL metadata 的顶层和嵌套 `metadata` 字段。但 nanobot core 的 `session.save()` 仍然会在某些场景下重写整个 JSONL 文件，丢失非标准字段。
+
+**核心矛盾**：webserver 和 nanobot core 共享同一个 JSONL 文件，两者的写入操作存在竞态条件。
+
+### 解决方案
+
+将 session 显示名称从 JSONL metadata 中**完全剥离**，改为独立文件存储：
+
+- **新增文件**：`~/.nanobot/workspace/sessions/session_names.json`
+  - 格式：`{ "session_id": "显示名称" }`
+  - 由 webserver 独占读写，nanobot core 不感知
+  - 原子写入（先写 `.tmp` 再 `os.replace`）
+
+- **webserver.py 改动**：
+  - 新增 `_read_session_names()` / `_write_session_names()` 辅助方法
+  - `_handle_rename_session()`: 从修改 JSONL → 改为写 `session_names.json`
+  - `_handle_get_sessions()`: 从 JSONL `custom_name` 读取 → 改为从 `session_names.json` 读取
+  - `_handle_search_sessions()`: 同上
+  - `_enrich_session_summaries()`: 同上
+  - 所有 `custom_name` 引用已清除
+
+- **数据迁移**：已将 3 个现有 JSONL 中的 `custom_name` 迁移到 `session_names.json`
+
+### 设计理念
+
+与 `session_parents.json`、`session_tags.json` 一致：UI 管理概念使用独立 JSON 文件，不侵入 JSONL 对话数据，彻底消除竞态。
+
+### 改动文件
+- `webserver.py` — session_names.json 读写 + 5 处 custom_name 引用替换
 
 ---
 

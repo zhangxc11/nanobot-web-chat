@@ -220,8 +220,8 @@
 1. **双击编辑**：在 Sidebar 的 Session 列表中，双击 session 名称可进入编辑模式
 2. **行内编辑**：编辑时显示输入框，替换原有名称文本
 3. **确认方式**：Enter 确认 / Escape 取消 / 失去焦点确认
-4. **持久化**：重命名后的名称存储在 JSONL metadata 的 `custom_name` 字段中
-5. **优先级**：`custom_name` > 第一条用户消息 > session_id
+4. **持久化**：重命名后的名称存储在独立文件 `session_names.json` 中（与 JSONL 解耦，避免 nanobot `session.save()` 覆盖竞态）
+5. **优先级**：`session_names.json` 中的名称 > 第一条用户消息 > session_id
 
 ---
 
@@ -1181,7 +1181,7 @@ Step 4 (Web UI 安全执行):
 
 **解决方案**：
 - 后端新增 `GET /api/sessions/search?q=keyword` — 搜索 session 标题和用户消息内容
-  - 匹配标题（custom_name 或首条用户消息摘要）和用户消息内容
+  - 匹配标题（session_names.json 中的自定义名称或首条用户消息摘要）和用户消息内容
   - 返回匹配的 session 列表，每个包含最多 3 条匹配摘要
   - 标题匹配优先排序，最多返回 20 条结果
 - 前端 Sidebar 新增搜索栏（在"新建对话"按钮下方）
