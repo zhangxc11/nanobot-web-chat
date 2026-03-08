@@ -128,6 +128,39 @@ def _keep_subagent_task(task: asyncio.Task) -> None:
     logger.debug(f"Subagent task registered in keeper (total: {len(_subagent_tasks)})")
 
 
+# ── WorkerSessionMessenger — Phase 30 inter-session messaging ──
+
+
+class WorkerSessionMessenger:
+    """SessionMessenger for web-chat worker — inject into running tasks or trigger new ones.
+
+    Implements the SessionMessenger protocol for the web-chat worker context.
+    When a subagent completes, it uses this messenger to deliver results back
+    to the parent session — either by injecting into a running task or by
+    triggering a new task execution.
+    """
+
+    async def send_to_session(self, target_session_key, content, source_session_key=None):
+        if source_session_key:
+            prefixed = f"[Message from session {source_session_key}]\n{content}"
+        else:
+            prefixed = content
+
+        with _tasks_lock:
+            task = _tasks.get(target_session_key)
+
+        if task and task['status'] == 'running':
+            # Running → inject into the task's inject queue as system role dict
+            task['_inject_queue'].put({"role": "system", "content": prefixed})
+            logger.info(f"SessionMessenger: injected into running task {target_session_key}")
+            return True
+
+        # Idle → trigger new task execution with session_messenger channel
+        _run_task_sdk(target_session_key, prefixed, channel='session_messenger')
+        logger.info(f"SessionMessenger: triggered new task for {target_session_key}")
+        return True
+
+
 # ── AgentRunner factory — one runner per task for concurrency safety ──
 # Each concurrent task gets its own AgentRunner with independent tool context,
 # so that _set_tool_context() in one task doesn't clobber another.
@@ -167,6 +200,8 @@ def _create_runner():
     detail_logger = LLMDetailLogger()
     audit_logger = AuditLogger()
 
+    messenger = WorkerSessionMessenger()
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -187,6 +222,7 @@ def _create_runner():
         detail_logger=detail_logger,
         audit_logger=audit_logger,
         subagent_task_keeper=_keep_subagent_task,
+        session_messenger=messenger,
     )
 
     runner = AgentRunner(agent_loop)
@@ -228,7 +264,7 @@ def _cleanup_old_tasks():
             del _tasks[k]
 
 
-def _run_task_sdk(session_key: str, message: str, images: list[str] | None = None):
+def _run_task_sdk(session_key: str, message: str, images: list[str] | None = None, channel: str = 'web'):
     """Run nanobot agent via SDK in the async event loop. Updates task registry."""
     from nanobot.agent.callbacks import DefaultCallbacks, AgentResult
 
@@ -280,16 +316,21 @@ def _run_task_sdk(session_key: str, message: str, images: list[str] | None = Non
             elif role == 'user':
                 # Injected user message — show in progress
                 content = message.get('content', '')
-                # Strip the prefix for display
-                display = content.replace('[User interjection during execution]\n', '')
-                progress_text = f"📝 User: {display[:80]}"
+                # Parse source from prefix (e.g. "[Message from user during execution]\n...")
+                import re as _re
+                _m = _re.match(r'^\[Message from (.+?)(?:\s+during execution)?\]\n(.*)', content, _re.DOTALL)
+                if _m:
+                    source, display = _m.group(1), _m.group(2)
+                else:
+                    source, display = 'user', content
+                progress_text = f"📝 {source}: {display[:80]}"
                 task['progress'].append(progress_text)
                 _notify_sse(task, 'progress', {
                     'text': progress_text,
                     'type': 'user_inject',
                 })
 
-        async def check_user_input(self) -> str | None:
+        async def check_user_input(self) -> str | dict | None:
             """Non-blocking check for pending user injection messages."""
             try:
                 return task['_inject_queue'].get_nowait()
@@ -322,7 +363,7 @@ def _run_task_sdk(session_key: str, message: str, images: list[str] | None = Non
             result = await runner.run(
                 message=message,
                 session_key=session_key,
-                channel='web',
+                channel=channel,
                 chat_id=session_key.split(':', 1)[-1] if ':' in session_key else session_key,
                 media=images,
                 callbacks=WorkerCallbacks(),
@@ -715,7 +756,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             return
 
         # Put message into the inject queue — will be picked up by check_user_input()
-        task['_inject_queue'].put(message)
+        task['_inject_queue'].put(f"[Message from user during execution]\n{message}")
         logger.info(f"Injected message into task: session={session_key}, message={message[:80]}...")
 
         self._send_json({'status': 'injected', 'message': 'Message queued for injection'})
