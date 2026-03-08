@@ -52,6 +52,7 @@
 | Phase 43: 三级树状父子关系 (§三十五 Issue #49) | ✅ 已完成 | main |
 | Phase 44: 斜杠命令失败后输入回填 (§三十六 Issue #50) | ✅ 已完成 | main |
 | Phase 45: restart.sh 进程发现与健康检查修复 (§三十七 Issue #51) | ✅ 已完成 | main |
+| Phase 46: Session Tag — done 标记与过滤 (§六 V1.3) | 🔜 进行中 | main |
 
 ---
 
@@ -1875,3 +1876,45 @@ Worker: ✅ running (pid: 65784, port: 8082, age: 53671s)
 
 ### Git
 - web-chat commit: `9fe6b8b` (restart.sh 修复) + pending (文档补全)
+
+---
+
+## Phase 46: Session Tag — done 标记与过滤 ✅
+
+> 日期：2026-03-08
+> 需求：REQUIREMENTS.md §六 Session Tag 功能（V1.3）
+> 架构：ARCHITECTURE.md §十七
+
+### 概述
+
+给 session 添加 tag 机制（MVP 只支持 `done`），支持在侧边栏标记已完成任务并过滤隐藏。
+
+### 任务清单
+
+- [x] **T46.1** 后端 — session_tags.json 读写 + API
+  - webserver.py: `GET /api/sessions/tags` 读取 tags 映射
+  - webserver.py: `PATCH /api/sessions/:id/tags` 更新单个 session tags
+  - 文件不存在时返回 `{}`，写入时原子操作（先写 tmp 再 rename）
+  - tags 为空数组时从 JSON 中删除该 key
+
+- [x] **T46.2** 前端 Store — tagsMap + hideDone 状态
+  - sessionStore.ts: 新增 `tagsMap`, `toggleDone()`, `hideDone`, `setHideDone()`
+  - api.ts: 新增 `fetchSessionTags()`, `patchSessionTags()`
+  - `fetchSessions()` 中 Promise.all 一并加载 tags
+
+- [x] **T46.3** 前端 UI — ✓ 按钮 + ✅ 标识 + 过滤 toggle
+  - SessionList.tsx: session item hover 显示 ✓ 按钮，点击 toggleDone
+  - SessionList.tsx: 已 done session 显示 ✅ + opacity 降低
+  - Sidebar 顶部: 新增 "隐藏已完成" toggle 按钮
+  - Sidebar.module.css: 相关样式
+
+- [x] **T46.4** 过滤逻辑 + 计数联动
+  - hideDone=true 时排除 tagsMap[key] 含 "done" 的根 session
+  - 搜索模式独立渲染（searchResults），天然不受 hideDone 影响
+  - Channel 分组计数随过滤联动（filteredRoots → groups）
+  - 子 session 展开列表中已 done 的仍显示（带 ✅ 标识 + opacity）
+
+- [x] **T46.5** 测试验证 + Git 提交
+  - 后端 API 验证：GET/PATCH tags 正常工作
+  - 前端 TypeScript 编译 + Vite build 通过
+  - Git commit

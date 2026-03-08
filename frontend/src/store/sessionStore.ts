@@ -7,6 +7,10 @@ interface SessionStore {
   sessions: Session[];
   /** Map from child sessionKey (or id) → parent sessionKey */
   parentMap: Record<string, string>;
+  /** Map from sessionKey → tags (e.g. ["done"]) */
+  tagsMap: Record<string, string[]>;
+  /** Whether to hide sessions tagged as "done" */
+  hideDone: boolean;
   activeSessionId: string | null;
   loading: boolean;
   error: string | null;
@@ -15,11 +19,16 @@ interface SessionStore {
   createSession: () => Promise<Session | null>;
   renameSession: (id: string, summary: string) => Promise<boolean>;
   deleteSession: (id: string) => Promise<boolean>;
+  /** Toggle "done" tag for a session. Returns new tags array. */
+  toggleDone: (session: Session) => Promise<void>;
+  setHideDone: (v: boolean) => void;
 }
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   parentMap: {},
+  tagsMap: {},
+  hideDone: true,
   activeSessionId: null,
   loading: false,
   error: null,
@@ -27,9 +36,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   fetchSessions: async () => {
     set({ loading: true, error: null });
     try {
-      const [sessionsData, parentMap] = await Promise.all([
+      const [sessionsData, parentMap, tagsMap] = await Promise.all([
         api.fetchSessions(),
         api.fetchSessionParents().catch(() => ({} as Record<string, string>)),
+        api.fetchSessionTags().catch(() => ({} as Record<string, string[]>)),
       ]);
       const sessions = sessionsData.sessions || [];
       // Filter out _comment and other meta keys
@@ -39,7 +49,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           cleanParentMap[k] = v;
         }
       }
-      set({ sessions, parentMap: cleanParentMap, loading: false });
+      set({ sessions, parentMap: cleanParentMap, tagsMap, loading: false });
       // Auto-select first session if none active
       if (!get().activeSessionId && sessions.length > 0) {
         set({ activeSessionId: sessions[0].id });
@@ -99,5 +109,37 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({ error: String(err) });
       return false;
     }
+  },
+
+  toggleDone: async (session: Session) => {
+    const { tagsMap } = get();
+    const key = session.sessionKey;
+    const currentTags = tagsMap[key] || [];
+    const isDone = currentTags.includes('done');
+
+    // Optimistic update
+    const newTags = isDone
+      ? currentTags.filter((t) => t !== 'done')
+      : [...currentTags, 'done'];
+    const newTagsMap = { ...tagsMap };
+    if (newTags.length > 0) {
+      newTagsMap[key] = newTags;
+    } else {
+      delete newTagsMap[key];
+    }
+    set({ tagsMap: newTagsMap });
+
+    try {
+      const patch = isDone ? { remove: ['done'] } : { add: ['done'] };
+      await api.patchSessionTags(session.id, patch);
+    } catch (err) {
+      // Rollback on failure
+      set({ tagsMap });
+      console.error('Failed to toggle done:', err);
+    }
+  },
+
+  setHideDone: (v: boolean) => {
+    set({ hideDone: v });
   },
 }));

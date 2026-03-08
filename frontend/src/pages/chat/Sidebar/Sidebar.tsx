@@ -8,7 +8,7 @@ import styles from './Sidebar.module.css';
 
 export default function Sidebar() {
   const { toggleSidebar } = useUIStore();
-  const { fetchSessions, createSession, setActiveSession, loading } = useSessionStore();
+  const { fetchSessions, createSession, setActiveSession, hideDone, setHideDone, loading } = useSessionStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<api.SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -79,6 +79,15 @@ export default function Sidebar() {
           {searchQuery && (
             <button className={styles.searchClear} onClick={handleClearSearch}>×</button>
           )}
+        </div>
+        <div className={styles.filterBar}>
+          <button
+            className={`${styles.filterToggle} ${hideDone ? styles.filterToggleActive : ''}`}
+            onClick={() => setHideDone(!hideDone)}
+            title={hideDone ? '显示已完成' : '隐藏已完成'}
+          >
+            {hideDone ? '🙈 隐藏已完成' : '👁 显示全部'}
+          </button>
         </div>
       </div>
       <div className={styles.sessionList}>

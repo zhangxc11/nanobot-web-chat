@@ -2067,3 +2067,44 @@ kill 进程后，额外检查端口是否已释放：
 **涉及仓库**: nanobot 核心仓库 (非 web-chat)
 **优先级**: 中（eval-bench 批量构造 Phase 3 迭代时实现）
 **详细设计**: `eval-bench-data/batch_build/DESIGN.md` §4.2
+
+---
+
+## 六、Session Tag 功能（V1.3）
+
+> 状态：**需求已确认** | 创建：2026-03-08
+
+### 6.1 背景与动机
+
+当前 session 列表随使用时间增长越来越长，已完成的任务 session 和进行中的混在一起，难以快速找到需要关注的 session。用户希望能给 session 打上标签（tag），首要用例是标记任务为 **done（已完成）**，从而在侧边栏过滤掉已完成的 session。
+
+### 6.2 MVP 功能范围
+
+#### 6.2.1 Tag 数据模型
+- 支持给 session 添加标签，MVP 只支持预定义 tag：`done`
+- 数据结构设计为数组 `["done"]`，为未来扩展（自定义 tag、多 tag）留空间
+- 存储为独立文件 `~/.nanobot/workspace/sessions/session_tags.json`，与 `session_parents.json` 模式一致
+- 格式：`{ "session_key": ["done"], ... }`
+
+#### 6.2.2 后端 API
+- `GET /api/sessions/tags` — 读取全量 tags 映射
+- `PATCH /api/sessions/:id/tags` — 更新单个 session 的 tags
+  - 请求体：`{ "add": ["done"] }` 或 `{ "remove": ["done"] }`
+  - 返回更新后该 session 的 tags
+
+#### 6.2.3 前端交互
+- **标记操作**：session item hover 时显示 ✓ 按钮，点击切换 done 状态
+- **视觉标识**：已完成 session 显示 ✅ 图标 + 文字变淡
+- **过滤控制**：Sidebar 顶部新增 "隐藏已完成" toggle 按钮，默认开启
+- **Channel 分组计数**：过滤后计数只数未被过滤的 session
+
+#### 6.2.4 与现有功能的交互规则
+- **树形结构**：父子 session 的 done 状态独立，不级联
+- **搜索**：搜索结果不受 done 过滤影响，搜索时显示所有 session
+- **子 session 显示**：父 session 展开的子 session 列表中，已 done 的子 session 仍然显示（带 ✅ 标识）
+
+### 6.3 未来扩展（不在 MVP 范围）
+- 自定义 tag（如 `important`、`bug`、`feature`）
+- Tag 颜色、图标自定义
+- 多 tag 组合过滤
+- 批量标记操作

@@ -36,6 +36,8 @@ for i, arg in enumerate(sys.argv):
 
 SESSIONS_DIR = os.path.expanduser('~/.nanobot/workspace/sessions')
 SESSION_PARENTS_FILE = os.path.join(SESSIONS_DIR, 'session_parents.json')
+SESSION_NAMES_FILE = os.path.join(SESSIONS_DIR, 'session_names.json')
+SESSION_TAGS_FILE = os.path.join(SESSIONS_DIR, 'session_tags.json')
 MEMORY_DIR = os.path.expanduser('~/.nanobot/workspace/memory')
 UPLOADS_DIR = os.path.expanduser('~/.nanobot/workspace/uploads')
 CONFIG_FILE = os.path.expanduser('~/.nanobot/config.json')
@@ -178,6 +180,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_session_parents()
             return
 
+        if path == '/api/sessions/tags':
+            self._handle_get_session_tags()
+            return
+
         if path == '/api/config':
             self._handle_get_config()
             return
@@ -289,6 +295,11 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
     def do_PATCH(self):
         path, params = self._parse_path()
 
+        route_params = self._match_route(path, '/api/sessions/:id/tags')
+        if route_params:
+            self._handle_patch_session_tags(route_params['id'])
+            return
+
         route_params = self._match_route(path, '/api/sessions/:id')
         if route_params:
             self._handle_rename_session(route_params['id'])
@@ -316,6 +327,9 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         if not os.path.isdir(SESSIONS_DIR):
             self._send_json({'sessions': sessions})
             return
+
+        # Load display names from session_names.json (takes priority over JSONL metadata)
+        session_names = self._read_session_names()
 
         for filepath in glob.glob(os.path.join(SESSIONS_DIR, '*.jsonl')):
             session_id = os.path.basename(filepath).replace('.jsonl', '')
@@ -354,7 +368,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                 logger.error(f"Failed to read session {session_id}: {e}")
                 continue
 
-            summary = metadata.get('custom_name') or (metadata.get('metadata') or {}).get('custom_name') or first_user_content or session_id
+            summary = session_names.get(session_id) or first_user_content or session_id
             last_active = metadata.get('updated_at', '')
             if not last_active:
                 mtime = os.path.getmtime(filepath)
@@ -414,6 +428,104 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'ok': True})
         except Exception as e:
             logger.error(f"Failed to write session parents: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    # ── Session names (display names) ──
+
+    def _read_session_names(self):
+        """Read session_names.json, return dict {session_id: display_name}."""
+        if os.path.isfile(SESSION_NAMES_FILE):
+            with open(SESSION_NAMES_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+
+    def _write_session_names(self, data):
+        """Atomic write session_names.json (write tmp then rename)."""
+        os.makedirs(os.path.dirname(SESSION_NAMES_FILE), exist_ok=True)
+        tmp_file = SESSION_NAMES_FILE + '.tmp'
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_file, SESSION_NAMES_FILE)
+
+    # ── Session tags ──
+
+    def _read_session_tags(self):
+        """Read session_tags.json, return dict. Returns {} if file missing."""
+        if os.path.isfile(SESSION_TAGS_FILE):
+            with open(SESSION_TAGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+
+    def _write_session_tags(self, data):
+        """Atomic write session_tags.json (write tmp then rename)."""
+        os.makedirs(os.path.dirname(SESSION_TAGS_FILE), exist_ok=True)
+        tmp_file = SESSION_TAGS_FILE + '.tmp'
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_file, SESSION_TAGS_FILE)
+
+    def _handle_get_session_tags(self):
+        """GET /api/sessions/tags — read all session tags."""
+        try:
+            data = self._read_session_tags()
+            self._send_json(data)
+        except Exception as e:
+            logger.error(f"Failed to read session tags: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_patch_session_tags(self, session_id):
+        """PATCH /api/sessions/:id/tags — add/remove tags for a session."""
+        try:
+            if '/' in session_id or '..' in session_id:
+                self._send_json({'error': 'Invalid session id'}, 400)
+                return
+
+            body = self._read_body()
+            if not body:
+                self._send_json({'error': 'Empty body'}, 400)
+                return
+
+            add_tags = body.get('add', [])
+            remove_tags = body.get('remove', [])
+
+            if not isinstance(add_tags, list) or not isinstance(remove_tags, list):
+                self._send_json({'error': '"add" and "remove" must be arrays'}, 400)
+                return
+
+            # Derive session_key from filename (strip .jsonl if present)
+            session_key = session_id.replace('.jsonl', '')
+            # Read the JSONL metadata to get the actual session key
+            filepath = os.path.join(SESSIONS_DIR, session_id + '.jsonl')
+            if os.path.isfile(filepath):
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        first_line = f.readline().strip()
+                        if first_line:
+                            meta = json.loads(first_line)
+                            if meta.get('_type') == 'metadata' and meta.get('key'):
+                                session_key = meta['key']
+                except Exception:
+                    pass  # fallback to session_id as key
+
+            data = self._read_session_tags()
+            current_tags = set(data.get(session_key, []))
+
+            for t in add_tags:
+                if isinstance(t, str):
+                    current_tags.add(t)
+            for t in remove_tags:
+                current_tags.discard(t)
+
+            if current_tags:
+                data[session_key] = sorted(current_tags)
+            else:
+                data.pop(session_key, None)
+
+            self._write_session_tags(data)
+            logger.info(f"Updated tags for {session_key}: {list(current_tags)}")
+            self._send_json({'tags': sorted(current_tags)})
+        except Exception as e:
+            logger.error(f"Failed to update session tags: {e}")
             self._send_json({'error': str(e)}, 500)
 
     def _handle_get_messages(self, session_id, params):
@@ -519,7 +631,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         """PATCH /api/sessions/:id — rename a session.
         
         Request body: { "summary": "新名称" }
-        Updates the metadata line in the JSONL file to include a custom_name field.
+        Stores the display name in session_names.json (independent of JSONL).
         """
         if '/' in session_id or '..' in session_id:
             self._send_json({'error': 'Invalid session id'}, 400)
@@ -536,39 +648,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'error': 'Empty summary'}, 400)
             return
 
-        # Read all lines, update metadata line with custom_name
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-
-            updated = False
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                try:
-                    obj = json.loads(stripped)
-                    if obj.get('_type') == 'metadata':
-                        obj['custom_name'] = new_name
-                        # Also store in nested metadata so nanobot session save preserves it
-                        if 'metadata' not in obj or not isinstance(obj.get('metadata'), dict):
-                            obj['metadata'] = {}
-                        obj['metadata']['custom_name'] = new_name
-                        from datetime import datetime
-                        obj['updated_at'] = datetime.now().isoformat()
-                        lines[i] = json.dumps(obj, ensure_ascii=False) + '\n'
-                        updated = True
-                        break
-                except json.JSONDecodeError:
-                    continue
-
-            if not updated:
-                logger.error(f"Metadata not found in session {session_id}")
-                self._send_json({'error': 'Metadata not found in session file'}, 500)
-                return
-
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
+            names = self._read_session_names()
+            names[session_id] = new_name
+            self._write_session_names(names)
 
             logger.info(f"Renamed session {session_id} to '{new_name}'")
             self._send_json({'id': session_id, 'summary': new_name})
@@ -613,13 +696,15 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
         try:
             results = []
+            # Load display names from session_names.json
+            session_names = self._read_session_names()
+
             for filename in os.listdir(SESSIONS_DIR):
                 if not filename.endswith('.jsonl'):
                     continue
                 filepath = os.path.join(SESSIONS_DIR, filename)
                 session_id = filename[:-6]  # remove .jsonl
                 summary = session_id
-                custom_name = None
                 matches = []  # matched user message snippets
 
                 with open(filepath, 'r', encoding='utf-8') as f:
@@ -632,10 +717,8 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                         except json.JSONDecodeError:
                             continue
 
-                        # Extract metadata
+                        # Skip metadata line
                         if obj.get('_type') == 'metadata':
-                            meta = obj.get('metadata', {})
-                            custom_name = obj.get('custom_name') or meta.get('custom_name')
                             continue
 
                         role = obj.get('role', '')
@@ -660,7 +743,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                                 snippet = content[:100]
                                 matches.append(snippet)
 
-                display_name = custom_name or summary
+                display_name = session_names.get(session_id) or summary
                 # Check if title matches
                 title_match = query in display_name.lower()
 
@@ -884,13 +967,21 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         
         Also marks sessions whose JSONL file has been deleted with 'deleted': True.
         """
+        # Load display names from session_names.json
+        session_names = self._read_session_names()
+
         for session_entry in result.get('by_session', []):
             session_id = session_entry['session_id']
             filename = session_id.replace(':', '_') + '.jsonl'
             filepath = os.path.join(SESSIONS_DIR, filename)
             summary = session_id
             deleted = False
-            if os.path.isfile(filepath):
+
+            # Check session_names.json first
+            file_session_id = filename[:-6]  # remove .jsonl
+            if file_session_id in session_names:
+                summary = session_names[file_session_id]
+            elif os.path.isfile(filepath):
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         first_user_content = ''
@@ -903,13 +994,6 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                             except json.JSONDecodeError:
                                 continue
                             if obj.get('_type') == 'metadata':
-                                summary = (
-                                    obj.get('custom_name')
-                                    or (obj.get('metadata') or {}).get('custom_name')
-                                    or ''
-                                )
-                                if summary:
-                                    break
                                 continue
                             if obj.get('role') == 'user' and not first_user_content:
                                 content = obj.get('content', '')
@@ -918,8 +1002,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                                     text_parts = [c.get('text', '') for c in content if c.get('type') == 'text']
                                     content = ' '.join(text_parts)
                                 first_user_content = content[:80] if content else ''
-                        if not summary:
-                            summary = first_user_content or session_id
+                        summary = first_user_content or session_id
                 except Exception:
                     pass
             else:

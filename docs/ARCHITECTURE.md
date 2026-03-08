@@ -1545,4 +1545,69 @@ store/providerStore.ts (新增)
 
 ---
 
+## 十七、Session Tag 功能
+
+### 17.1 数据存储
+
+```
+~/.nanobot/workspace/sessions/
+├── session_parents.json    # 已有：父子关系映射
+├── session_tags.json       # 新增：tag 映射
+│   格式: { "session_key": ["done"], ... }
+└── *.jsonl                 # session 对话数据（不修改）
+```
+
+设计理由：Tag 是 UI 管理概念，不属于对话内容，使用独立文件与 `session_parents.json` 模式一致。
+
+### 17.2 后端 API
+
+#### GET /api/sessions/tags
+- 读取 `session_tags.json`，返回完整映射
+- 文件不存在时返回 `{}`
+
+#### PATCH /api/sessions/:id/tags
+- `:id` 为 URL-encoded 的 session filename（与现有 rename/delete 一致）
+- 请求体：`{ "add": ["done"] }` 和/或 `{ "remove": ["done"] }`
+- 从文件名解析 session_key，更新 `session_tags.json` 中对应条目
+- 返回：`{ "tags": ["done"] }`
+- tags 为空数组时从 JSON 中删除该 key
+
+### 17.3 前端状态管理
+
+```
+store/sessionStore.ts 扩展:
+  tagsMap: Record<string, string[]>   // session_key → tags
+  fetchTags()                         // GET /api/sessions/tags
+  toggleDone(session)                 // PATCH → 本地更新 tagsMap
+  hideDone: boolean                   // 过滤开关，默认 true
+  setHideDone(v)
+```
+
+`fetchTags()` 在 `fetchSessions()` 中一并调用。
+
+### 17.4 前端组件变更
+
+```
+SessionList.tsx:
+  ├── 过滤逻辑：hideDone=true 时排除 tagsMap[key] 含 "done" 的根 session
+  ├── SessionItem hover → 显示 ✓ 按钮（done toggle）
+  ├── 已 done session：✅ 图标 + opacity 降低
+  └── Channel 分组计数：过滤后重新计数
+
+Sidebar 顶部:
+  └── "隐藏已完成" toggle 按钮（搜索框附近）
+```
+
+### 17.5 交互规则
+
+| 场景 | 行为 |
+|------|------|
+| 父 session 标记 done | 子 session 不受影响（独立） |
+| 子 session 标记 done | 父 session 不受影响 |
+| 搜索模式 | 忽略 hideDone 过滤，显示所有匹配结果 |
+| 子 session 展开列表 | 已 done 子 session 仍显示（带 ✅） |
+| 过滤 toggle 切换 | 即时生效，无需刷新 |
+
+---
+
 *本文档将随开发进展持续更新。*

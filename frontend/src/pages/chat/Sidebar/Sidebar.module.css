@@ -686,3 +686,109 @@
   color: var(--text-muted);
   flex-shrink: 0;
 }
+
+/* ── Filter Bar ── */
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.filterToggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.filterToggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.filterToggleActive {
+  background: var(--bg-tertiary);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Session Done State ── */
+
+.sessionDone {
+  opacity: 0.55;
+}
+
+.sessionDone:hover {
+  opacity: 0.8;
+}
+
+.doneIcon {
+  font-size: 12px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.doneIconSmall {
+  font-size: 10px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.sessionActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.sessionDoneBtn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+  padding: 0;
+  line-height: 1;
+}
+
+.sessionItem:hover .sessionDoneBtn {
+  opacity: 0.5;
+}
+
+.sessionDoneBtn:hover {
+  opacity: 1 !important;
+  color: #34c759;
+  background: rgba(52, 199, 89, 0.1);
+}
+
+.sessionDoneBtnActive {
+  opacity: 0.8 !important;
+  color: #34c759;
+}
+
+.childItemDone {
+  opacity: 0.55;
+}
+
+.childItemDone:hover {
+  opacity: 0.8;
+}

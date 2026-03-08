@@ -263,15 +263,17 @@ interface SessionItemProps {
   lastActiveAt: string;
   messageCount: number;
   isActive: boolean;
+  isDone: boolean;
   descendantCount: number;
   onClick: () => void;
   onRename: (id: string, newName: string) => void;
   onDelete: (id: string) => void;
+  onToggleDone: () => void;
 }
 
 function SessionItem({
   id, summary, filename, sessionKey, lastActiveAt,
-  isActive, descendantCount, onClick, onRename, onDelete,
+  isActive, isDone, descendantCount, onClick, onRename, onDelete, onToggleDone,
 }: SessionItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(summary);
@@ -324,7 +326,7 @@ function SessionItem({
 
   return (
     <div
-      className={`${styles.sessionItem} ${isActive ? styles.sessionActive : ''}`}
+      className={`${styles.sessionItem} ${isActive ? styles.sessionActive : ''} ${isDone ? styles.sessionDone : ''}`}
       onClick={onClick}
       onDoubleClick={handleDoubleClick}
       title="双击编辑名称"
@@ -342,6 +344,7 @@ function SessionItem({
           />
         ) : (
           <div className={styles.sessionSummary}>
+            {isDone && <span className={styles.doneIcon}>✅</span>}
             <span className={styles.sessionSummaryText}>{displayTitle}</span>
             {descendantCount > 0 && (
               <span className={styles.childBadge}>{descendantCount}</span>
@@ -349,13 +352,22 @@ function SessionItem({
           </div>
         )}
         {!editing && (
-          <button
-            className={styles.sessionDeleteBtn}
-            onClick={handleDeleteClick}
-            title="删除对话"
-          >
-            ×
-          </button>
+          <div className={styles.sessionActions}>
+            <button
+              className={`${styles.sessionDoneBtn} ${isDone ? styles.sessionDoneBtnActive : ''}`}
+              onClick={(e) => { e.stopPropagation(); onToggleDone(); }}
+              title={isDone ? '取消完成' : '标记完成'}
+            >
+              ✓
+            </button>
+            <button
+              className={styles.sessionDeleteBtn}
+              onClick={handleDeleteClick}
+              title="删除对话"
+            >
+              ×
+            </button>
+          </div>
         )}
       </div>
       {showConfirm && (
@@ -378,20 +390,24 @@ function ChildrenPanel({
   children,
   depth,
   expandedKeys,
+  tagsMap,
   onToggle,
   activeSessionId,
   onSelect,
   onRename,
   onDelete,
+  onToggleDone,
 }: {
   children: SessionTreeNode[];
   depth: number;
   expandedKeys: Record<string, boolean>;
+  tagsMap: Record<string, string[]>;
   onToggle: (key: string) => void;
   activeSessionId: string | null;
   onSelect: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  onToggleDone: (session: Session) => void;
 }) {
   if (children.length === 0) return null;
 
@@ -404,6 +420,7 @@ function ChildrenPanel({
         const isActive = child.session.id === activeSessionId;
         const isExpanded = expandedKeys[ck] === true;
         const hasChildren = child.children.length > 0;
+        const childIsDone = (tagsMap[ck] || []).includes('done');
 
         return (
           <div key={ck} className={styles.childNodeWrapper}>
@@ -419,10 +436,11 @@ function ChildrenPanel({
                 <span className={styles.childExpandPlaceholder}>·</span>
               )}
               <div
-                className={`${styles.childItem} ${isActive ? styles.childItemActive : ''}`}
+                className={`${styles.childItem} ${isActive ? styles.childItemActive : ''} ${childIsDone ? styles.childItemDone : ''}`}
                 onClick={() => onSelect(child.session.id)}
                 title={child.session.sessionKey}
               >
+                {childIsDone && <span className={styles.doneIconSmall}>✅</span>}
                 <span className={styles.childItemTitle}>
                   {getDisplayTitle(child.session.summary, child.session.sessionKey || '', child.session.id)}
                 </span>
@@ -437,11 +455,13 @@ function ChildrenPanel({
                 children={child.children}
                 depth={depth + 1}
                 expandedKeys={expandedKeys}
+                tagsMap={tagsMap}
                 onToggle={onToggle}
                 activeSessionId={activeSessionId}
                 onSelect={onSelect}
                 onRename={onRename}
                 onDelete={onDelete}
+                onToggleDone={onToggleDone}
               />
             )}
           </div>
@@ -456,23 +476,28 @@ function SessionTreeItem({
   node,
   activeSessionId,
   expandedKeys,
+  tagsMap,
   onToggleExpand,
   onSelect,
   onRename,
   onDelete,
+  onToggleDone,
 }: {
   node: SessionTreeNode;
   activeSessionId: string | null;
   expandedKeys: Record<string, boolean>;
+  tagsMap: Record<string, string[]>;
   onToggleExpand: (key: string) => void;
   onSelect: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  onToggleDone: (session: Session) => void;
 }) {
   const sk = node.session.sessionKey || node.session.id;
   const isActive = node.session.id === activeSessionId;
   const hasChildren = node.children.length > 0;
   const isExpanded = expandedKeys[sk] === true;
+  const isDone = (tagsMap[sk] || []).includes('done');
 
   // Show children panel if: this node is active OR explicitly expanded
   const showChildren = hasChildren && (isActive || isExpanded);
@@ -488,10 +513,12 @@ function SessionTreeItem({
           lastActiveAt={node.session.lastActiveAt}
           messageCount={node.session.messageCount}
           isActive={isActive}
+          isDone={isDone}
           descendantCount={node.descendantCount}
           onClick={() => onSelect(node.session.id)}
           onRename={onRename}
           onDelete={onDelete}
+          onToggleDone={() => onToggleDone(node.session)}
         />
       </div>
       {showChildren && (
@@ -510,11 +537,13 @@ function SessionTreeItem({
               children={node.children}
               depth={0}
               expandedKeys={expandedKeys}
+              tagsMap={tagsMap}
               onToggle={onToggleExpand}
               activeSessionId={activeSessionId}
               onSelect={onSelect}
               onRename={onRename}
               onDelete={onDelete}
+              onToggleDone={onToggleDone}
             />
           )}
         </div>
@@ -541,7 +570,7 @@ function ChannelGroupHeader({
 // ── Main Component ──
 
 export default function SessionList() {
-  const { sessions, parentMap, activeSessionId, setActiveSession, loading, error, fetchSessions, renameSession, deleteSession } = useSessionStore();
+  const { sessions, parentMap, tagsMap, hideDone, activeSessionId, setActiveSession, loading, error, fetchSessions, renameSession, deleteSession, toggleDone } = useSessionStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
 
@@ -551,8 +580,18 @@ export default function SessionList() {
     [sessions, parentMap],
   );
 
+  // Filter out "done" root sessions when hideDone is on
+  const filteredRoots = useMemo(() => {
+    if (!hideDone) return roots;
+    return roots.filter((node) => {
+      const key = node.session.sessionKey || node.session.id;
+      const tags = tagsMap[key] || [];
+      return !tags.includes('done');
+    });
+  }, [roots, hideDone, tagsMap]);
+
   // Group roots by channel
-  const groups = useMemo(() => groupByChannel(roots), [roots]);
+  const groups = useMemo(() => groupByChannel(filteredRoots), [filteredRoots]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -610,10 +649,12 @@ export default function SessionList() {
                 node={node}
                 activeSessionId={activeSessionId}
                 expandedKeys={expandedKeys}
+                tagsMap={tagsMap}
                 onToggleExpand={toggleExpand}
                 onSelect={setActiveSession}
                 onRename={handleRename}
                 onDelete={handleDelete}
+                onToggleDone={toggleDone}
               />
             ))}
           </div>

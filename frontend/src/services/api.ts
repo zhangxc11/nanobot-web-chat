@@ -27,6 +27,25 @@ export async function updateSessionParents(parents: Record<string, string>): Pro
   if (!res.ok) throw new Error(`Failed to update session parents: ${res.status}`);
 }
 
+export async function fetchSessionTags(): Promise<Record<string, string[]>> {
+  const res = await fetch(`${API_BASE}/sessions/tags`);
+  if (!res.ok) throw new Error(`Failed to fetch session tags: ${res.status}`);
+  return res.json();
+}
+
+export async function patchSessionTags(
+  sessionId: string,
+  patch: { add?: string[]; remove?: string[] }
+): Promise<{ tags: string[] }> {
+  const res = await fetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}/tags`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`Failed to update session tags: ${res.status}`);
+  return res.json();
+}
+
 export async function createSession(): Promise<Session> {
   const res = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
   if (!res.ok) throw new Error(`Failed to create session: ${res.status}`);
