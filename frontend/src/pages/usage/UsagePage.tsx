@@ -469,6 +469,8 @@ export default function UsagePage() {
                 <span className={styles.colNum}>输出</span>
                 <span className={styles.colNum}>总计</span>
                 <span className={styles.colNum}>调用</span>
+                <span className={styles.colNum}>缓存命中</span>
+                <span className={styles.colNum}>缓存写入</span>
               </div>
               {modelEntries.map(([model, stats]) => (
                 <div key={model} className={styles.tableRow}>
@@ -479,6 +481,12 @@ export default function UsagePage() {
                   <span className={styles.colNum}>{formatTokens(stats.completion_tokens)}</span>
                   <span className={styles.colNum}>{formatTokens(stats.total_tokens)}</span>
                   <span className={styles.colNum}>{stats.llm_calls}</span>
+                  <span className={styles.colNum} style={{ color: '#4caf50' }}>
+                    {formatTokens(stats.cache_read_input_tokens ?? 0)}
+                  </span>
+                  <span className={styles.colNum} style={{ color: '#ff9800' }}>
+                    {formatTokens(stats.cache_creation_input_tokens ?? 0)}
+                  </span>
                 </div>
               ))}
             </div>
@@ -502,6 +510,8 @@ export default function UsagePage() {
                 <span className={styles.colNum}>输出</span>
                 <span className={styles.colNum}>总计</span>
                 <span className={styles.colNum}>调用</span>
+                <span className={styles.colNum}>缓存命中</span>
+                <span className={styles.colNum}>缓存写入</span>
               </div>
               {pagedSessions.map((s) => (
                 <div key={s.session_id} className={styles.tableRow}>
@@ -515,6 +525,12 @@ export default function UsagePage() {
                   <span className={styles.colNum}>{formatTokens(s.completion_tokens)}</span>
                   <span className={styles.colNum}>{formatTokens(s.total_tokens)}</span>
                   <span className={styles.colNum}>{s.llm_calls}</span>
+                  <span className={styles.colNum} style={{ color: '#4caf50' }}>
+                    {formatTokens(s.cache_read_input_tokens ?? 0)}
+                  </span>
+                  <span className={styles.colNum} style={{ color: '#ff9800' }}>
+                    {formatTokens(s.cache_creation_input_tokens ?? 0)}
+                  </span>
                 </div>
               ))}
               {deletedSessions.length > 0 && sessionPage === totalPages - 1 && (
@@ -526,6 +542,8 @@ export default function UsagePage() {
                   <span className={styles.colNum}>{formatTokens(deletedAgg.completion_tokens)}</span>
                   <span className={styles.colNum}>{formatTokens(deletedAgg.total_tokens)}</span>
                   <span className={styles.colNum}>{deletedAgg.llm_calls}</span>
+                  <span className={styles.colNum}>-</span>
+                  <span className={styles.colNum}>-</span>
                 </div>
               )}
             </div>

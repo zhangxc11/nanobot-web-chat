@@ -2205,6 +2205,23 @@ nanobot core §32 在 LLM provider 层新增了 `cache_creation_input_tokens` / 
 | `frontend/src/pages/usage/UsagePage.tsx` | 时间段选择器 + 未缓存卡片 + Session 聚合 + 分页 + 曲线图 |
 | `frontend/src/pages/usage/UsagePage.module.css` | 新增样式 |
 
+#### Bug 修复：childBadge (+N) 不显示
+
+**现象**：按对话表格中，聚合后的根 session 应显示 `+N` 子 session 徽章，但实际不可见。
+
+**根因**：`.colSession` 同时设置 `display: flex` + `overflow: hidden`，当 summary 文字过长时 badge 被 overflow 裁掉。
+
+**修复**：拆分为 `.colSession`（flex 容器，`min-width: 0`，不设 overflow）+ `.sessionName`（承载 `text-overflow: ellipsis`），badge 的 `flex-shrink: 0` 保证始终可见。
+
+#### 改进 5："按模型"和"按对话"表格增加缓存列
+
+**现象**：按模型和按对话表格只显示输入/输出/总计/调用，缺少缓存命中和缓存写入信息。
+
+**解决方案**：
+- 两个表格均新增"缓存命中"（绿色）和"缓存写入"（橙色）两列
+- 数据来自后端已有的 `cache_read_input_tokens` / `cache_creation_input_tokens` 字段
+- 纯前端改动，无后端变更
+
 ---
 
 ### 手动维护的 backlog
