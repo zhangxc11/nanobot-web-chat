@@ -506,7 +506,7 @@ export default function UsagePage() {
               {pagedSessions.map((s) => (
                 <div key={s.session_id} className={styles.tableRow}>
                   <span className={styles.colSession} title={s.session_id}>
-                    {s.summary || s.session_id}
+                    <span className={styles.sessionName}>{s.summary || s.session_id}</span>
                     {s.childCount > 0 && (
                       <span className={styles.childBadge}>+{s.childCount}</span>
                     )}
