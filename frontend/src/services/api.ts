@@ -255,6 +255,8 @@ export interface UsageByModel {
   completion_tokens: number;
   total_tokens: number;
   llm_calls: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
 }
 
 export interface UsageBySession {
@@ -264,6 +266,8 @@ export interface UsageBySession {
   prompt_tokens: number;
   completion_tokens: number;
   llm_calls: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
   last_used: string;
   deleted?: boolean;
 }
@@ -273,6 +277,8 @@ export interface UsageStats {
   total_completion_tokens: number;
   total_tokens: number;
   total_llm_calls: number;
+  total_cache_creation_input_tokens?: number;
+  total_cache_read_input_tokens?: number;
   by_model: Record<string, UsageByModel>;
   by_session: UsageBySession[];
 }
@@ -283,6 +289,8 @@ export interface SessionUsage {
   completion_tokens: number;
   total_tokens: number;
   llm_calls: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
   records: Array<{
     id: number;
     model: string;
@@ -290,6 +298,8 @@ export interface SessionUsage {
     completion_tokens: number;
     total_tokens: number;
     llm_calls: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
     started_at: string;
     finished_at: string;
   }>;
@@ -301,6 +311,8 @@ export interface DailyUsage {
   completion_tokens: number;
   total_tokens: number;
   llm_calls: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
 }
 
 export async function fetchUsage(): Promise<UsageStats> {

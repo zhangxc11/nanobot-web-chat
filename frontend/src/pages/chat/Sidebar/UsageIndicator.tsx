@@ -50,17 +50,28 @@ export default function UsageIndicator() {
   if (!activeSessionId || !usage || usage.llm_calls === 0) return null;
 
   // Group by model from records
-  const byModel: Record<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number; llm_calls: number }> = {};
+  const byModel: Record<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number; llm_calls: number; cache_creation_input_tokens: number; cache_read_input_tokens: number }> = {};
   for (const r of usage.records) {
     if (!byModel[r.model]) {
-      byModel[r.model] = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, llm_calls: 0 };
+      byModel[r.model] = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, llm_calls: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
     }
     byModel[r.model].prompt_tokens += r.prompt_tokens;
     byModel[r.model].completion_tokens += r.completion_tokens;
     byModel[r.model].total_tokens += r.total_tokens;
     byModel[r.model].llm_calls += r.llm_calls;
+    byModel[r.model].cache_creation_input_tokens += r.cache_creation_input_tokens ?? 0;
+    byModel[r.model].cache_read_input_tokens += r.cache_read_input_tokens ?? 0;
   }
   const modelEntries = Object.entries(byModel);
+
+  // Cache stats
+  const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const hasCacheData = cacheCreation > 0 || cacheRead > 0;
+
+  // Context size: last record's prompt_tokens approximates current context
+  const lastRecord = usage.records.length > 0 ? usage.records[usage.records.length - 1] : null;
+  const contextTokens = lastRecord ? lastRecord.prompt_tokens : 0;
 
   return (
     <div className={styles.usageSection}>
@@ -72,6 +83,7 @@ export default function UsageIndicator() {
         <span className={styles.usageIcon}>📊</span>
         <span className={styles.usageText}>
           {formatTokens(usage.total_tokens)} tokens · {usage.llm_calls} 次调用
+          {contextTokens > 0 && <> · 上下文 {formatTokens(contextTokens)}</>}
         </span>
         <span className={styles.usageToggle}>{expanded ? '▾' : '▸'}</span>
       </button>
@@ -90,6 +102,34 @@ export default function UsageIndicator() {
             <span className={styles.usageLabel}>总计</span>
             <span className={styles.usageValue}>{formatTokens(usage.total_tokens)}</span>
           </div>
+
+          {contextTokens > 0 && (
+            <div className={styles.usageRow}>
+              <span className={styles.usageLabel}>上下文</span>
+              <span className={styles.usageValue}>{formatTokens(contextTokens)}</span>
+            </div>
+          )}
+
+          {hasCacheData && (
+            <>
+              <div className={styles.usageDivider} />
+              <div className={styles.usageSubtitle}>缓存</div>
+              <div className={styles.usageRow}>
+                <span className={styles.usageLabel}>缓存命中</span>
+                <span className={styles.usageValue} style={{ color: '#4caf50' }}>{formatTokens(cacheRead)}</span>
+              </div>
+              <div className={styles.usageRow}>
+                <span className={styles.usageLabel}>缓存写入</span>
+                <span className={styles.usageValue} style={{ color: '#ff9800' }}>{formatTokens(cacheCreation)}</span>
+              </div>
+              <div className={styles.usageRow}>
+                <span className={styles.usageLabel}>未缓存</span>
+                <span className={styles.usageValue}>
+                  {formatTokens(Math.max(0, usage.prompt_tokens - cacheRead - cacheCreation))}
+                </span>
+              </div>
+            </>
+          )}
 
           {modelEntries.length > 0 && (
             <>

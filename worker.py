@@ -345,11 +345,15 @@ def _run_task_sdk(session_key: str, message: str, images: list[str] | None = Non
                 'completion_tokens': usage.get('completion_tokens', 0),
                 'total_tokens': usage.get('total_tokens', 0),
                 'llm_calls': usage.get('llm_calls', 0),
+                'cache_creation_input_tokens': usage.get('cache_creation_input_tokens', 0),
+                'cache_read_input_tokens': usage.get('cache_read_input_tokens', 0),
                 'started_at': usage.get('started_at', ''),
                 'finished_at': usage.get('finished_at', ''),
             }
             logger.info(f"Usage: {usage.get('total_tokens', 0)} tokens, "
-                        f"{usage.get('llm_calls', 0)} calls")
+                        f"{usage.get('llm_calls', 0)} calls, "
+                        f"cache_create={usage.get('cache_creation_input_tokens', 0)}, "
+                        f"cache_read={usage.get('cache_read_input_tokens', 0)}")
 
         async def on_done(self, result: AgentResult) -> None:
             pass  # Handled in the wrapper below

@@ -79,6 +79,22 @@ export default function UsagePage() {
             <div className={styles.cardLabel}>调用次数</div>
             <div className={styles.cardValue}>{globalUsage.total_llm_calls}</div>
           </div>
+          {(globalUsage.total_cache_read_input_tokens ?? 0) > 0 && (
+            <div className={styles.card}>
+              <div className={styles.cardLabel}>缓存命中</div>
+              <div className={styles.cardValue} style={{ color: '#4caf50' }}>
+                {formatTokens(globalUsage.total_cache_read_input_tokens ?? 0)}
+              </div>
+            </div>
+          )}
+          {(globalUsage.total_cache_creation_input_tokens ?? 0) > 0 && (
+            <div className={styles.card}>
+              <div className={styles.cardLabel}>缓存写入</div>
+              <div className={styles.cardValue} style={{ color: '#ff9800' }}>
+                {formatTokens(globalUsage.total_cache_creation_input_tokens ?? 0)}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Daily Trend Chart */}

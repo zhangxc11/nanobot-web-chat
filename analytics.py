@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS token_usage (
     total_tokens      INTEGER DEFAULT 0,
     llm_calls         INTEGER DEFAULT 0,
     started_at        TEXT NOT NULL,
-    finished_at       TEXT NOT NULL
+    finished_at       TEXT NOT NULL,
+    cache_creation_input_tokens INTEGER DEFAULT 0,
+    cache_read_input_tokens     INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_session  ON token_usage(session_key);
@@ -35,6 +37,12 @@ CREATE INDEX IF NOT EXISTS idx_usage_started  ON token_usage(started_at);
 CREATE INDEX IF NOT EXISTS idx_usage_finished ON token_usage(finished_at);
 CREATE INDEX IF NOT EXISTS idx_usage_model    ON token_usage(model);
 """
+
+# Migration SQL for existing databases that lack cache columns.
+_MIGRATION_SQL = [
+    "ALTER TABLE token_usage ADD COLUMN cache_creation_input_tokens INTEGER DEFAULT 0",
+    "ALTER TABLE token_usage ADD COLUMN cache_read_input_tokens INTEGER DEFAULT 0",
+]
 
 
 class AnalyticsDB:
@@ -72,6 +80,19 @@ class AnalyticsDB:
         """Create tables and indexes if they don't exist."""
         with self._connect() as conn:
             conn.executescript(SCHEMA_SQL)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Apply schema migrations for existing databases."""
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(token_usage)")}
+        for sql in _MIGRATION_SQL:
+            col_name = sql.split("ADD COLUMN")[1].strip().split()[0]
+            if col_name not in existing:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists (race condition)
 
     # ── Write ──
 
@@ -123,7 +144,9 @@ class AnalyticsDB:
                 SELECT COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
                        COALESCE(SUM(completion_tokens), 0) as total_completion_tokens,
                        COALESCE(SUM(total_tokens), 0) as total_tokens,
-                       COALESCE(SUM(llm_calls), 0) as total_llm_calls
+                       COALESCE(SUM(llm_calls), 0) as total_llm_calls,
+                       COALESCE(SUM(cache_creation_input_tokens), 0) as total_cache_creation,
+                       COALESCE(SUM(cache_read_input_tokens), 0) as total_cache_read
                 FROM token_usage
                 """
             ).fetchone()
@@ -133,6 +156,8 @@ class AnalyticsDB:
                 "total_completion_tokens": row["total_completion_tokens"],
                 "total_tokens": row["total_tokens"],
                 "total_llm_calls": row["total_llm_calls"],
+                "total_cache_creation_input_tokens": row["total_cache_creation"],
+                "total_cache_read_input_tokens": row["total_cache_read"],
             }
 
             # By model
@@ -143,7 +168,9 @@ class AnalyticsDB:
                        SUM(prompt_tokens) as prompt_tokens,
                        SUM(completion_tokens) as completion_tokens,
                        SUM(total_tokens) as total_tokens,
-                       SUM(llm_calls) as llm_calls
+                       SUM(llm_calls) as llm_calls,
+                       SUM(cache_creation_input_tokens) as cache_creation_input_tokens,
+                       SUM(cache_read_input_tokens) as cache_read_input_tokens
                 FROM token_usage
                 GROUP BY model
                 ORDER BY total_tokens DESC
@@ -154,6 +181,8 @@ class AnalyticsDB:
                     "completion_tokens": r["completion_tokens"],
                     "total_tokens": r["total_tokens"],
                     "llm_calls": r["llm_calls"],
+                    "cache_creation_input_tokens": r["cache_creation_input_tokens"],
+                    "cache_read_input_tokens": r["cache_read_input_tokens"],
                 }
 
             # By session
@@ -165,6 +194,8 @@ class AnalyticsDB:
                        SUM(completion_tokens) as completion_tokens,
                        SUM(total_tokens) as total_tokens,
                        SUM(llm_calls) as llm_calls,
+                       SUM(cache_creation_input_tokens) as cache_creation_input_tokens,
+                       SUM(cache_read_input_tokens) as cache_read_input_tokens,
                        MAX(finished_at) as last_used
                 FROM token_usage
                 GROUP BY session_key
@@ -177,6 +208,8 @@ class AnalyticsDB:
                     "completion_tokens": r["completion_tokens"],
                     "total_tokens": r["total_tokens"],
                     "llm_calls": r["llm_calls"],
+                    "cache_creation_input_tokens": r["cache_creation_input_tokens"],
+                    "cache_read_input_tokens": r["cache_read_input_tokens"],
                     "last_used": r["last_used"],
                 })
 
@@ -204,7 +237,9 @@ class AnalyticsDB:
                 SELECT COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
                        COALESCE(SUM(completion_tokens), 0) as completion_tokens,
                        COALESCE(SUM(total_tokens), 0) as total_tokens,
-                       COALESCE(SUM(llm_calls), 0) as llm_calls
+                       COALESCE(SUM(llm_calls), 0) as llm_calls,
+                       COALESCE(SUM(cache_creation_input_tokens), 0) as cache_creation_input_tokens,
+                       COALESCE(SUM(cache_read_input_tokens), 0) as cache_read_input_tokens
                 FROM token_usage
                 WHERE session_key = ?
                 """,
@@ -215,7 +250,8 @@ class AnalyticsDB:
             for r in conn.execute(
                 """
                 SELECT id, model, prompt_tokens, completion_tokens,
-                       total_tokens, llm_calls, started_at, finished_at
+                       total_tokens, llm_calls, started_at, finished_at,
+                       cache_creation_input_tokens, cache_read_input_tokens
                 FROM token_usage
                 WHERE session_key = ?
                 ORDER BY started_at ASC
@@ -230,6 +266,8 @@ class AnalyticsDB:
                 "completion_tokens": row["completion_tokens"],
                 "total_tokens": row["total_tokens"],
                 "llm_calls": row["llm_calls"],
+                "cache_creation_input_tokens": row["cache_creation_input_tokens"],
+                "cache_read_input_tokens": row["cache_read_input_tokens"],
                 "records": records,
             }
 
@@ -250,7 +288,9 @@ class AnalyticsDB:
                        SUM(prompt_tokens) as prompt_tokens,
                        SUM(completion_tokens) as completion_tokens,
                        SUM(total_tokens) as total_tokens,
-                       SUM(llm_calls) as llm_calls
+                       SUM(llm_calls) as llm_calls,
+                       SUM(cache_creation_input_tokens) as cache_creation_input_tokens,
+                       SUM(cache_read_input_tokens) as cache_read_input_tokens
                 FROM token_usage
                 WHERE date(started_at) >= date('now', ?)
                 GROUP BY day
@@ -266,6 +306,8 @@ class AnalyticsDB:
                     "completion_tokens": r["completion_tokens"],
                     "total_tokens": r["total_tokens"],
                     "llm_calls": r["llm_calls"],
+                    "cache_creation_input_tokens": r["cache_creation_input_tokens"],
+                    "cache_read_input_tokens": r["cache_read_input_tokens"],
                 }
                 for r in rows
             ]

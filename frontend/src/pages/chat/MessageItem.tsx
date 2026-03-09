@@ -11,6 +11,8 @@ export interface UsageRecord {
   completion_tokens: number;
   total_tokens: number;
   llm_calls: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
   started_at: string;
   finished_at: string;
 }
@@ -177,17 +179,27 @@ function ToolProcessCollapsible({ items, toolCount, usageRecords }: { items: Pro
             }
             return <ToolCallLine key={item.id} name={item.name} content={item.content} args={item.args} />;
           })}
-          {usageRecords && usageRecords.length > 0 && (
-            <div className={styles.toolUsageSummary}>
-              <span className={styles.toolUsageIcon}>📊</span>
-              <span className={styles.toolUsageText}>
-                {formatTokens(usageRecords.reduce((sum, r) => sum + r.total_tokens, 0))} tokens
-                {' '}({formatTokens(usageRecords.reduce((sum, r) => sum + r.prompt_tokens, 0))} 输入
-                {' '}/ {formatTokens(usageRecords.reduce((sum, r) => sum + r.completion_tokens, 0))} 输出)
-                {' '}· {usageRecords.reduce((sum, r) => sum + r.llm_calls, 0)} 次调用
-              </span>
-            </div>
-          )}
+          {usageRecords && usageRecords.length > 0 && (() => {
+            const totalTokens = usageRecords.reduce((sum, r) => sum + r.total_tokens, 0);
+            const promptTokens = usageRecords.reduce((sum, r) => sum + r.prompt_tokens, 0);
+            const completionTokens = usageRecords.reduce((sum, r) => sum + r.completion_tokens, 0);
+            const llmCalls = usageRecords.reduce((sum, r) => sum + r.llm_calls, 0);
+            const cacheRead = usageRecords.reduce((sum, r) => sum + (r.cache_read_input_tokens ?? 0), 0);
+            const cacheCreation = usageRecords.reduce((sum, r) => sum + (r.cache_creation_input_tokens ?? 0), 0);
+            return (
+              <div className={styles.toolUsageSummary}>
+                <span className={styles.toolUsageIcon}>📊</span>
+                <span className={styles.toolUsageText}>
+                  {formatTokens(totalTokens)} tokens
+                  {' '}({formatTokens(promptTokens)} 输入
+                  {' '}/ {formatTokens(completionTokens)} 输出)
+                  {' '}· {llmCalls} 次调用
+                  {cacheRead > 0 && <> · <span style={{ color: '#4caf50' }}>缓存 {formatTokens(cacheRead)}</span></>}
+                  {cacheCreation > 0 && <> · <span style={{ color: '#ff9800' }}>写入 {formatTokens(cacheCreation)}</span></>}
+                </span>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
