@@ -474,7 +474,12 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'error': str(e)}, 500)
 
     def _handle_patch_session_tags(self, session_id):
-        """PATCH /api/sessions/:id/tags — add/remove tags for a session."""
+        """PATCH /api/sessions/:id/tags — add/remove tags for a session.
+        
+        Tags are stored keyed by session_id (filename without .jsonl),
+        which is globally unique. This avoids the dedup issue where
+        old feishu sessions share the same sessionKey.
+        """
         try:
             if '/' in session_id or '..' in session_id:
                 self._send_json({'error': 'Invalid session id'}, 400)
@@ -492,23 +497,21 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({'error': '"add" and "remove" must be arrays'}, 400)
                 return
 
-            # Derive session_key from filename (strip .jsonl if present)
-            session_key = session_id.replace('.jsonl', '')
-            # Read the JSONL metadata to get the actual session key
-            filepath = os.path.join(SESSIONS_DIR, session_id + '.jsonl')
-            if os.path.isfile(filepath):
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        first_line = f.readline().strip()
-                        if first_line:
-                            meta = json.loads(first_line)
-                            if meta.get('_type') == 'metadata' and meta.get('key'):
-                                session_key = meta['key']
-                except Exception:
-                    pass  # fallback to session_id as key
+            # Use session_id directly as the key (globally unique)
+            tag_key = session_id
 
             data = self._read_session_tags()
-            current_tags = set(data.get(session_key, []))
+
+            # --- Migration guard: detect old sessionKey-format keys ---
+            # If any existing key contains ':', warn that migration is needed.
+            has_old_keys = any(':' in k for k in data)
+            if has_old_keys:
+                logger.warning(
+                    "session_tags.json contains old sessionKey-format keys (with ':'). "
+                    "Run migrate_session_keys_to_ids.py to migrate to id-based keys."
+                )
+
+            current_tags = set(data.get(tag_key, []))
 
             for t in add_tags:
                 if isinstance(t, str):
@@ -517,12 +520,12 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                 current_tags.discard(t)
 
             if current_tags:
-                data[session_key] = sorted(current_tags)
+                data[tag_key] = sorted(current_tags)
             else:
-                data.pop(session_key, None)
+                data.pop(tag_key, None)
 
             self._write_session_tags(data)
-            logger.info(f"Updated tags for {session_key}: {list(current_tags)}")
+            logger.info(f"Updated tags for {tag_key}: {list(current_tags)}")
             self._send_json({'tags': sorted(current_tags)})
         except Exception as e:
             logger.error(f"Failed to update session tags: {e}")

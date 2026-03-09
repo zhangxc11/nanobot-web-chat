@@ -5,9 +5,9 @@ import * as api from '../services/api';
 
 interface SessionStore {
   sessions: Session[];
-  /** Map from child sessionKey (or id) → parent sessionKey */
+  /** Map from child session id → parent session id */
   parentMap: Record<string, string>;
-  /** Map from sessionKey → tags (e.g. ["done"]) */
+  /** Map from session id → tags (e.g. ["done"]) */
   tagsMap: Record<string, string[]>;
   /** Whether to hide sessions tagged as "done" */
   hideDone: boolean;
@@ -113,7 +113,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   toggleDone: async (session: Session) => {
     const { tagsMap } = get();
-    const key = session.sessionKey;
+    const key = session.id;
     const currentTags = tagsMap[key] || [];
     const isDone = currentTags.includes('done');
 

@@ -45,13 +45,31 @@ const CHANNEL_CONFIG: Record<string, { label: string; icon: string; order: numbe
   other:     { label: '其他',      icon: '📁', order: 7 },
 };
 
-function getChannel(sessionKey: string): string {
-  if (!sessionKey) return 'other';
-  const colonIdx = sessionKey.indexOf(':');
-  const prefix = colonIdx > 0 ? sessionKey.substring(0, colonIdx) : sessionKey;
-  const dotIdx = prefix.indexOf('.');
-  const base = dotIdx > 0 ? prefix.substring(0, dotIdx) : prefix;
-  return CHANNEL_CONFIG[base] ? base : 'other';
+/**
+ * Extract channel from session id (filename without .jsonl).
+ * Examples:
+ *   webchat_1772944924         → webchat
+ *   feishu.lab.1772376517      → feishu
+ *   feishu.lab_ou_b0cea..._xxx → feishu
+ *   subagent_webchat_xxx       → subagent
+ *   cli_xxx                    → cli
+ */
+function getChannel(sessionId: string): string {
+  if (!sessionId) return 'other';
+  // Find the first separator: either '_' or '.'
+  const underIdx = sessionId.indexOf('_');
+  const dotIdx = sessionId.indexOf('.');
+  let prefix: string;
+  if (underIdx < 0 && dotIdx < 0) {
+    prefix = sessionId;
+  } else if (underIdx < 0) {
+    prefix = sessionId.substring(0, dotIdx);
+  } else if (dotIdx < 0) {
+    prefix = sessionId.substring(0, underIdx);
+  } else {
+    prefix = sessionId.substring(0, Math.min(underIdx, dotIdx));
+  }
+  return CHANNEL_CONFIG[prefix] ? prefix : 'other';
 }
 
 // ── Tree building ──
@@ -65,66 +83,86 @@ interface SessionTreeNode {
 }
 
 /**
- * Resolve the parent sessionKey for a session.
- * 1. Check manual parentMap (highest priority)
- * 2. Heuristic A: subagent sessions parse parent from key
- * 3. Heuristic B: webchat API sessions — extract 10-digit timestamp, find matching parent across all channels
+ * Resolve the parent session id for a session.
+ * All lookups are based on session.id (filename without .jsonl), which is globally unique.
+ *
+ * 1. Check manual parentMap (highest priority) — now keyed by id
+ * 2. Heuristic A: subagent sessions parse parent from id
+ *    id format: subagent_{parent_channel}_{parent_payload}_{8hex}
+ *    e.g. subagent_webchat_1772696251_abc12345 → parent id: webchat_1772696251
+ * 3. Heuristic B: webchat API sessions — extract 10-digit timestamp, find matching parent
+ *    Search priority:
+ *      a) Exact: any session id matching {channel}_{timestamp} (e.g. webchat_1772696251, cli_1772696251)
+ *      b) Suffix: any session id ending with _{timestamp} (e.g. webchat_dispatch_1772696251_1772700001)
  * 4. Return null if no parent found (root session)
  */
 function resolveParent(
   session: Session,
   parentMap: Record<string, string>,
-  allSessionKeys?: Set<string>,
+  allSessionIds?: Set<string>,
 ): string | null {
-  const sk = session.sessionKey || '';
   const id = session.id || '';
 
-  // 1. Manual override — check by sessionKey and by id
-  if (parentMap[sk]) return parentMap[sk];
+  // 1. Manual override — check by id
   if (parentMap[id]) return parentMap[id];
 
-  // 2. Subagent heuristic: subagent:{parent_sanitized}_{8hex}
-  if (sk.startsWith('subagent:')) {
-    const suffix = sk.substring('subagent:'.length);
+  // 2. Subagent heuristic: subagent_{parent_sanitized}_{8hex}
+  //    In id format, the channel separator is '_' (not ':').
+  //    subagent_webchat_1772696251_abc12345 → parent: webchat_1772696251
+  if (id.startsWith('subagent_')) {
+    const suffix = id.substring('subagent_'.length);
     const match = suffix.match(/^(.+)_([0-9a-f]{8})$/);
     if (match) {
-      const parentSanitized = match[1];
-      const underIdx = parentSanitized.indexOf('_');
-      if (underIdx > 0) {
-        return parentSanitized.substring(0, underIdx) + ':' + parentSanitized.substring(underIdx + 1);
+      const parentId = match[1]; // e.g. webchat_1772696251
+      // Verify parent exists in loaded sessions
+      if (allSessionIds && allSessionIds.has(parentId)) {
+        return parentId;
       }
-      return parentSanitized;
+      // If not found directly, return anyway (parentMap may have it)
+      return parentId;
     }
   }
 
-  // 3. Webchat API session heuristic: webchat:<role>_<10-digit-timestamp>_<detail>
+  // 3. Webchat API session heuristic: webchat_<role>_<10-digit-timestamp>_<detail>
   //    Extract the FIRST 10-digit timestamp, then search for parent session.
   //    Search priority:
-  //      a) Exact: any session ending with :<timestamp> (e.g. webchat:1772696251, cli:1772696251)
-  //      b) Suffix: any session ending with _<timestamp> (e.g. webchat:dispatch_1772696251_1772700001)
+  //      a) Exact: any session id matching {channel}_{timestamp} pattern
+  //         (e.g. webchat_1772696251, cli_1772696251)
+  //      b) Suffix: any session id ending with _{timestamp}
+  //         (e.g. webchat_dispatch_1772696251_1772700001)
   //    This supports:
-  //      - Cross-channel parents (cli:xxx, feishu.lab:xxx, webchat:xxx)
+  //      - Cross-channel parents (cli_xxx, feishu.lab_xxx, webchat_xxx)
   //      - Three-level trees: master → dispatch → worker
-  //        dispatch key: webchat:dispatch_<master_ts>_<dispatch_ts>
-  //        worker key:   webchat:worker_<dispatch_ts>_<detail>
-  //        worker extracts dispatch_ts → matches dispatch ending with _<dispatch_ts>
-  if (sk.startsWith('webchat:')) {
-    const suffix = sk.substring('webchat:'.length);
+  if (id.startsWith('webchat_')) {
+    const suffix = id.substring('webchat_'.length);
     // Only for API sessions (suffix contains non-digit chars)
     if (/[^0-9]/.test(suffix)) {
       const tsMatch = suffix.match(/_(\d{10})(?:_|$)/);
-      if (tsMatch && allSessionKeys) {
+      if (tsMatch && allSessionIds) {
         const ts = tsMatch[1];
-        // Priority a: exact match — session ending with :<timestamp>
-        for (const candidate of allSessionKeys) {
-          if (candidate.endsWith(':' + ts)) {
-            return candidate;
+        // Priority a: exact match — session id like {channel}_{timestamp}
+        // This matches patterns like webchat_1772696251, cli_1772696251
+        // We look for ids where the part after the channel prefix is exactly the timestamp
+        for (const candidate of allSessionIds) {
+          // Check if candidate ends with _{ts} AND the part before is a simple channel prefix
+          // i.e., candidate is like "webchat_1772696251" or "cli_1772696251"
+          if (candidate.endsWith('_' + ts)) {
+            // Ensure this is a root session (channel_timestamp pattern, no extra underscores in between)
+            const prefix = candidate.substring(0, candidate.length - ts.length - 1);
+            // For channel.subchannel format (feishu.lab), check the part before dot
+            // Root session patterns: webchat_ts, cli_ts, feishu.lab_ts, feishu.lab_ou_xxx_ts
+            // We need to distinguish root sessions from other sessions ending with _ts
+            // Root: the prefix is a channel name (no digits, or channel.subchannel)
+            // A simple heuristic: if prefix doesn't contain any 10-digit number, it's likely a root
+            if (!/\d{10}/.test(prefix) && candidate !== id) {
+              return candidate;
+            }
           }
         }
         // Priority b: suffix match — session ending with _<timestamp>
         // This enables three-level trees (worker → dispatch)
-        for (const candidate of allSessionKeys) {
-          if (candidate !== sk && candidate.endsWith('_' + ts)) {
+        for (const candidate of allSessionIds) {
+          if (candidate !== id && candidate.endsWith('_' + ts)) {
             return candidate;
           }
         }
@@ -137,10 +175,10 @@ function resolveParent(
 
 /**
  * Build the full session tree.
- * Returns: { roots, childMap, descendantCount }
+ * All lookups use session.id (globally unique), NOT sessionKey.
+ * Returns: { roots, nodeByKey }
  *   - roots: sessions that have no parent (or parent not found)
- *   - childMap: sessionKey → direct children SessionTreeNodes
- *   - descendantCount: sessionKey → total descendant count
+ *   - nodeByKey: id → SessionTreeNode
  */
 function buildSessionTree(
   sessions: Session[],
@@ -149,38 +187,29 @@ function buildSessionTree(
   roots: SessionTreeNode[];
   nodeByKey: Map<string, SessionTreeNode>;
 } {
-  // Build lookup by sessionKey AND by id
-  const sessionByKey = new Map<string, Session>();
-  const allSessionKeys = new Set<string>();
+  // Collect all session ids
+  const allSessionIds = new Set<string>();
   for (const s of sessions) {
-    if (s.sessionKey) {
-      sessionByKey.set(s.sessionKey, s);
-      allSessionKeys.add(s.sessionKey);
-    }
-    sessionByKey.set(s.id, s);
+    allSessionIds.add(s.id);
   }
 
-  // Create tree nodes
+  // Create tree nodes keyed by id
   const nodeByKey = new Map<string, SessionTreeNode>();
   for (const s of sessions) {
-    const key = s.sessionKey || s.id;
-    if (!nodeByKey.has(key)) {
-      nodeByKey.set(key, { session: s, children: [], descendantCount: 0 });
-    }
+    nodeByKey.set(s.id, { session: s, children: [], descendantCount: 0 });
   }
 
   // Assign children
-  const childSessionKeys = new Set<string>();
+  const childSessionIds = new Set<string>();
   for (const s of sessions) {
-    const parentKey = resolveParent(s, parentMap, allSessionKeys);
-    if (!parentKey) continue;
+    const parentId = resolveParent(s, parentMap, allSessionIds);
+    if (!parentId) continue;
 
-    const parentNode = nodeByKey.get(parentKey);
-    const childKey = s.sessionKey || s.id;
-    const childNode = nodeByKey.get(childKey);
+    const parentNode = nodeByKey.get(parentId);
+    const childNode = nodeByKey.get(s.id);
     if (parentNode && childNode && parentNode !== childNode) {
       parentNode.children.push(childNode);
-      childSessionKeys.add(childKey);
+      childSessionIds.add(s.id);
     }
   }
 
@@ -197,9 +226,8 @@ function buildSessionTree(
   // Roots = sessions not assigned as children
   const roots: SessionTreeNode[] = [];
   for (const s of sessions) {
-    const key = s.sessionKey || s.id;
-    if (!childSessionKeys.has(key)) {
-      const node = nodeByKey.get(key);
+    if (!childSessionIds.has(s.id)) {
+      const node = nodeByKey.get(s.id);
       if (node) roots.push(node);
     }
   }
@@ -233,7 +261,7 @@ function groupByChannel(roots: SessionTreeNode[]): ChannelGroup[] {
   const groupMap = new Map<string, SessionTreeNode[]>();
 
   for (const node of roots) {
-    const ch = getChannel(node.session.sessionKey || '');
+    const ch = getChannel(node.session.id);
     if (!groupMap.has(ch)) groupMap.set(ch, []);
     groupMap.get(ch)!.push(node);
   }
@@ -416,7 +444,7 @@ function ChildrenPanel({
   return (
     <div className={styles.childrenPanel} style={{ paddingLeft: indent }}>
       {children.map((child) => {
-        const ck = child.session.sessionKey || child.session.id;
+        const ck = child.session.id;
         const isActive = child.session.id === activeSessionId;
         const isExpanded = expandedKeys[ck] === true;
         const hasChildren = child.children.length > 0;
@@ -493,7 +521,7 @@ function SessionTreeItem({
   onDelete: (id: string) => void;
   onToggleDone: (session: Session) => void;
 }) {
-  const sk = node.session.sessionKey || node.session.id;
+  const sk = node.session.id;
   const isActive = node.session.id === activeSessionId;
   const hasChildren = node.children.length > 0;
   const isExpanded = expandedKeys[sk] === true;
@@ -584,7 +612,7 @@ export default function SessionList() {
   const filteredRoots = useMemo(() => {
     if (!hideDone) return roots;
     return roots.filter((node) => {
-      const key = node.session.sessionKey || node.session.id;
+      const key = node.session.id;
       const tags = tagsMap[key] || [];
       return !tags.includes('done');
     });
@@ -645,7 +673,7 @@ export default function SessionList() {
           <div className={styles.channelGroupSessions}>
             {group.roots.map((node) => (
               <SessionTreeItem
-                key={node.session.sessionKey || node.session.id}
+                key={node.session.id}
                 node={node}
                 activeSessionId={activeSessionId}
                 expandedKeys={expandedKeys}

@@ -2068,6 +2068,39 @@ kill 进程后，额外检查端口是否已释放：
 
 ---
 
+## 三十九、全链路统一用 session.id 替代 sessionKey (v5.1)
+
+> 2026-03-09 修复飞书旧 session 的 sessionKey 重复导致列表渲染异常
+
+### Issue #53：飞书旧格式 session 的 sessionKey 重复导致列表渲染异常
+
+**背景**：飞书旧格式 session（如 `feishu.lab_ou_xxx_1772196120.jsonl`）的 metadata key 只包含 `channel:user_id`，不含时间戳，导致同一用户的所有旧 session 共享相同的 `sessionKey`。
+
+**问题**：
+1. `buildSessionTree()` 中 `nodeByKey` 用 `sessionKey` 做 Map key，重复 key 只保留首个
+2. React key 冲突（`SessionTreeItem` 的 `key={node.session.sessionKey || node.session.id}`）
+3. 点击指向同一 session
+4. `tagsMap` 和 `expandedKeys` 基于 sessionKey 查找，重复 key 导致状态混乱
+
+**方案**：全链路统一用 `session.id`（文件名，天然唯一）替代 `sessionKey` 作为标识。
+
+**保留 sessionKey 的场景**：
+- analytics DB 的 `session_key` 列（历史数据向前兼容）
+- worker 通信（nanobot core 用 sessionKey 定位/创建 JSONL 文件）
+- JSONL metadata 的 key 字段（nanobot core 依赖）
+
+**改动范围**：
+| 文件 | 改动 |
+|------|------|
+| `SessionList.tsx` | nodeByKey/allSessionKeys/childSessionKeys 全部改用 id；resolveParent 改为基于 id 格式；getChannel 改为从 id 提取；所有 React key 用 id；tagsMap/expandedKeys 查找用 id |
+| `sessionStore.ts` | toggleDone() 中 key 改用 session.id |
+| `webserver.py` | _handle_patch_tags() 改为用 session_id 存 tags |
+| 迁移脚本 | session_tags.json 和 session_parents.json 的 key 从 sessionKey 迁移为 id |
+
+**详细分析**：见 `docs/ISSUE_SESSION_KEY_DEDUP.md`
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
