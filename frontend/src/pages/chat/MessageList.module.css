@@ -579,3 +579,87 @@
 .errorText {
   color: var(--text-primary);
 }
+
+/* ── System Inject Card (subagent results) ── */
+
+.systemInjectCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 8px 16px;
+}
+
+.systemInjectHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.08));
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, border-color 0.15s;
+  max-width: 85%;
+}
+
+.systemInjectHeader:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(139, 92, 246, 0.14));
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.systemInjectIcon {
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.systemInjectLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.systemInjectArrow {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.systemInjectTime {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.systemInjectBody {
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  max-width: 85%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.systemInjectBody p {
+  margin: 4px 0;
+}
+
+.systemInjectBody ul,
+.systemInjectBody ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+/* ── Progress: system inject step ── */
+
+.progressSystemInject {
+  color: rgba(99, 102, 241, 0.9);
+  font-style: italic;
+}

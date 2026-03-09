@@ -4,7 +4,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import type { ProgressStep } from '@/types';
 import type { SessionUsage } from '@/services/api';
 import * as api from '@/services/api';
-import MessageItem, { groupMessages, AssistantTurnGroup } from './MessageItem';
+import MessageItem, { groupMessages, AssistantTurnGroup, SystemInjectCard } from './MessageItem';
 import styles from './MessageList.module.css';
 
 /** A single progress step — supports expand/collapse for tool results */
@@ -53,6 +53,15 @@ function ProgressStepItem({ step }: { step: ProgressStep }) {
     // User injected message: "📝 User: message"
     return (
       <div className={`${styles.progressStep} ${styles.progressUserInject}`}>
+        <span className={styles.progressText}>{step.text}</span>
+      </div>
+    );
+  }
+
+  if (step.type === 'system_inject') {
+    // Subagent result notification: "🤖 subagent: result"
+    return (
+      <div className={`${styles.progressStep} ${styles.progressSystemInject}`}>
         <span className={styles.progressText}>{step.text}</span>
       </div>
     );
@@ -290,6 +299,9 @@ export default function MessageList() {
           }
           if (group.type === 'system') {
             return <MessageItem key={group.messages[0].id} message={group.messages[0]} />;
+          }
+          if (group.type === 'system-inject') {
+            return <SystemInjectCard key={group.messages[0].id} message={group.messages[0]} />;
           }
           // assistant-turn: render compactly
           return <AssistantTurnGroup key={`turn-${idx}`} messages={group.messages} usageRecords={sessionUsage?.records} />;

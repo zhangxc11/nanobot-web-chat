@@ -560,7 +560,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                     continue
 
                 role = obj.get('role', '')
-                if role not in ('user', 'assistant', 'tool'):
+                if role not in ('user', 'assistant', 'tool', 'system'):
                     continue
 
                 msg = {

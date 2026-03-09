@@ -17,7 +17,7 @@ export interface ToolCall {
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant' | 'tool' | 'system-local';
+  role: 'user' | 'assistant' | 'tool' | 'system-local' | 'system';
   content: string | ContentBlock[];
   timestamp: string;
   toolCalls?: ToolCall[];
@@ -36,8 +36,8 @@ export interface ContentBlock {
 export interface ProgressStep {
   /** Display text (e.g. "exec → result summary") */
   text: string;
-  /** Step type: undefined = thinking text, 'tool_hint' = tool call hint, 'tool_result' = tool execution result, 'user_inject' = user injected message */
-  type?: 'tool_hint' | 'tool_result' | 'user_inject';
+  /** Step type: undefined = thinking text, 'tool_hint' = tool call hint, 'tool_result' = tool execution result, 'user_inject' = user injected message, 'system_inject' = subagent result */
+  type?: 'tool_hint' | 'tool_result' | 'user_inject' | 'system_inject';
   /** Tool name (for tool_hint and tool_result types) */
   name?: string;
   /** Full tool output content (only for tool_result type, for expand/collapse) */

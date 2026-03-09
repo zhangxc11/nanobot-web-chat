@@ -313,6 +313,23 @@ def _run_task_sdk(session_key: str, message: str, images: list[str] | None = Non
                     'content': content,
                 })
 
+            elif role == 'system':
+                # Subagent result or other system injection — send as dedicated SSE event
+                content = message.get('content', '')
+                import re as _re
+                _m = _re.match(r'^\[Message from session (.+?)\]\n(.*)', content, _re.DOTALL)
+                if _m:
+                    source, body = _m.group(1), _m.group(2)
+                else:
+                    source, body = 'system', content
+                progress_text = f"🤖 {source}: {body[:80]}"
+                task['progress'].append(progress_text)
+                _notify_sse(task, 'progress', {
+                    'text': progress_text,
+                    'type': 'system_inject',
+                    'content': content,
+                })
+
             elif role == 'user':
                 # Injected user message — show in progress
                 content = message.get('content', '')

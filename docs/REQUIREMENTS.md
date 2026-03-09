@@ -2264,3 +2264,77 @@ nanobot core §32 在 LLM provider 层新增了 `cache_creation_input_tokens` / 
 **涉及仓库**: nanobot 核心仓库 (非 web-chat)
 **优先级**: 中（eval-bench 批量构造 Phase 3 迭代时实现）
 **详细设计**: `eval-bench-data/batch_build/DESIGN.md` §4.2
+
+---
+
+## 四十一、System Inject 消息展示 (v5.3)
+
+> 2026-03-09 展示 subagent 返回等系统注入消息
+
+### Issue #55：Subagent 返回结果在 Web Chat 中不可见
+
+**现象**：
+1. Agent 通过 `spawn` 创建 subagent 执行后台任务
+2. Subagent 完成后，结果通过 `SessionMessenger` 注入到父 session 的 JSONL 中（`role: "system"`）
+3. Agent 收到注入消息后正常处理并回复
+4. 但 Web Chat 前端**看不到** subagent 返回的 system 消息，只能看到 agent 基于它生成的回复
+5. 用户无法了解 subagent 具体返回了什么
+
+**根因**：
+1. **后端**：`webserver.py` 消息过滤只允许 `user/assistant/tool` 三种角色，`system` 被过滤掉
+2. **前端**：`Message.role` 类型不含 `system`，`groupMessages()` 不识别 `system` 角色
+3. **SSE 流**：Worker `on_message()` 不处理 `system` 角色消息，实时注入时无 SSE 通知
+
+**注意**：JSONL 中的 `role: "system"` 消息都是运行时注入的（subagent 返回、SessionMessenger 注入等），**不是**开头的系统 prompt（系统 prompt 由 nanobot 核心在 LLM 调用时动态拼接，不写入 JSONL）。
+
+**解决方案**：
+
+#### 后端
+- `webserver.py`：消息过滤放行 `system` 角色
+- `worker.py`：SSE `on_message()` 新增 `system` 角色处理，发送 `system_inject` 类型 progress 事件
+
+#### 前端
+- `types/index.ts`：`Message.role` 增加 `'system'`；`ProgressStep.type` 增加 `'system_inject'`
+- `MessageItem.tsx`：
+  - `groupMessages()` 识别 `system` 角色消息，归为独立的 `'system-inject'` group
+  - 新增 `SystemInjectCard` 组件：紫色渐变通知卡片，默认折叠，点击展开查看 Markdown 渲染的结果内容
+  - `parseSystemInject()` 解析 subagent 返回消息格式，去掉 boilerplate，提取结果正文
+- `MessageList.tsx`：渲染 `system-inject` group；`ProgressStepItem` 支持 `system_inject` 类型
+- `MessageList.module.css`：紫色调通知卡片样式
+
+#### 渲染效果
+
+**历史消息加载**（默认折叠）：
+```
+┌──────────────────────────────────────────────┐
+│ 🤖 subagent f60a77e9 返回结果  ▸  16:30     │  ← 点击展开
+└──────────────────────────────────────────────┘
+```
+
+**展开后**：
+```
+┌──────────────────────────────────────────────┐
+│ 🤖 subagent f60a77e9 返回结果  ▾  16:30     │
+├──────────────────────────────────────────────┤
+│ 任务已完成。结果如下：                         │
+│ - 当前时间：2026-03-09 16:30                 │
+│ - 系统信息：macOS arm64                      │
+│ ...                                          │
+└──────────────────────────────────────────────┘
+```
+
+**Streaming 实时通知**（progress 区域）：
+```
+↳ 🤖 subagent:webchat_xxx_f60a77e9: 任务已完成。结果如下...
+```
+
+### 改动范围
+
+| 文件 | 改动 | 风险 |
+|------|------|------|
+| `webserver.py` | 消息过滤放行 `system` 角色 | 🟡 中风险 |
+| `worker.py` | SSE on_message 处理 system 角色 | 🟡 中风险 |
+| `frontend/src/types/index.ts` | Message.role + ProgressStep.type 扩展 | 🟢 安全 |
+| `frontend/src/pages/chat/MessageItem.tsx` | groupMessages + SystemInjectCard 组件 | 🟢 安全 |
+| `frontend/src/pages/chat/MessageList.tsx` | system-inject group 渲染 + progress 类型 | 🟢 安全 |
+| `frontend/src/pages/chat/MessageList.module.css` | 紫色通知卡片样式 | 🟢 安全 |

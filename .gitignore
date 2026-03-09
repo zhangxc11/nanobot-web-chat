@@ -2,3 +2,4 @@ reference/
 server.log
 node_modules/
 __pycache__/
+analytics.db

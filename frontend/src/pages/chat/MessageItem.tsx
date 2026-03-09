@@ -269,7 +269,7 @@ export default function MessageItem({ message }: MessageItemProps) {
 // ── Grouping logic ──
 
 export interface MessageGroup {
-  type: 'user' | 'assistant-turn' | 'system';
+  type: 'user' | 'assistant-turn' | 'system' | 'system-inject';
   messages: Message[];
 }
 
@@ -282,6 +282,13 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
 
     if (msg.role === 'user' || msg.role === 'system-local') {
       groups.push({ type: msg.role === 'system-local' ? 'system' : 'user', messages: [msg] });
+      i++;
+      continue;
+    }
+
+    // Injected system messages (subagent results, etc.) — show as notification card
+    if (msg.role === 'system') {
+      groups.push({ type: 'system-inject', messages: [msg] });
       i++;
       continue;
     }
@@ -464,6 +471,99 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
           <div className={styles.timestamp}>{formatTimestamp(lastTimestamp || messageToolTimestamp || '')}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── System Inject Card (subagent results, etc.) ──
+
+/** Parse a system inject message into structured parts */
+function parseSystemInject(content: string): { source: string; label: string; body: string } {
+  // Format: "[Message from session subagent:xxx]\n[Subagent Result Notification]\n..."
+  const lines = content.split('\n');
+  let source = '';
+  let label = '';
+  let bodyStart = 0;
+
+  // Line 0: [Message from session subagent:xxx_id]
+  const sourceMatch = lines[0]?.match(/^\[Message from session (.+?)\]$/);
+  if (sourceMatch) {
+    source = sourceMatch[1];
+    bodyStart = 1;
+  }
+
+  // Line 1: [Subagent Result Notification] or similar bracket label
+  const labelMatch = lines[bodyStart]?.match(/^\[(.+?)\]$/);
+  if (labelMatch) {
+    label = labelMatch[1];
+    bodyStart++;
+  }
+
+  // Skip "A previously spawned subagent 'xxx' has completed successfully." boilerplate
+  while (bodyStart < lines.length) {
+    const line = lines[bodyStart];
+    if (line.match(/^A previously spawned subagent .+ has completed/)) {
+      bodyStart++;
+      continue;
+    }
+    // Skip empty lines after boilerplate
+    if (line.trim() === '' && bodyStart > 0) {
+      bodyStart++;
+      continue;
+    }
+    break;
+  }
+
+  // Find and skip "Original task:" section — go to "Subagent result:" section
+  let resultStart = bodyStart;
+  for (let i = bodyStart; i < lines.length; i++) {
+    if (lines[i].match(/^Subagent result:/i)) {
+      resultStart = i + 1;
+      break;
+    }
+  }
+
+  const body = lines.slice(resultStart).join('\n').trim();
+
+  return { source, label: label || 'System Notification', body: body || lines.slice(bodyStart).join('\n').trim() };
+}
+
+/** Extract a short subagent label from source like "subagent:webchat_xxx_abc123" */
+function formatSubagentSource(source: string): string {
+  // "subagent:webchat_1772950145_f60a77e9" → "subagent f60a77e9"
+  const m = source.match(/subagent:.*?_([a-f0-9]{6,})$/);
+  if (m) return `subagent ${m[1].slice(0, 8)}`;
+  // "subagent:xxx" → "subagent"
+  if (source.startsWith('subagent')) return 'subagent';
+  return source;
+}
+
+export function SystemInjectCard({ message }: { message: Message }) {
+  const [expanded, setExpanded] = useState(false);
+  const content = getTextContent(message.content);
+  const { source, body } = parseSystemInject(content);
+  const displaySource = formatSubagentSource(source);
+
+  return (
+    <div className={styles.systemInjectCard}>
+      <div
+        className={styles.systemInjectHeader}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className={styles.systemInjectIcon}>🤖</span>
+        <span className={styles.systemInjectLabel}>
+          {displaySource} 返回结果
+        </span>
+        <span className={styles.systemInjectArrow}>{expanded ? '▾' : '▸'}</span>
+        {message.timestamp && (
+          <span className={styles.systemInjectTime}>{formatTimestamp(message.timestamp)}</span>
+        )}
+      </div>
+      {expanded && (
+        <div className={styles.systemInjectBody}>
+          <MarkdownRenderer content={body} />
+        </div>
+      )}
     </div>
   );
 }
