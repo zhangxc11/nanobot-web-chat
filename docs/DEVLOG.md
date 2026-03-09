@@ -2387,3 +2387,20 @@ nanobot 的 gateway、webserver、worker 日志散落在 `/tmp/` 目录下：
 ### 改动文件
 - `MarkdownRenderer.tsx` — 重构：CodeBlock 拆分为 FencedCodeBlock + InlineCode
 - `MarkdownRenderer.module.css` — 新增 `.codeBlockPre`，调整 `.codeBlock code`
+
+### Git
+- `5e3541c` — 代码块换行修复：FencedCodeBlock + InlineCode 拆分
+- `a53262e` — 代码块多余 padding/空行修复 + 长行横向滚动
+
+### 三次修复：代码块额外 padding + 长行自动换行
+
+**用户反馈**：代码块上下多空行、左边多空格、长行自动折行破坏显示
+
+**根因**：
+1. highlight.js 默认 `pre code.hljs { padding: 1em }` 未被覆盖（选择器特异性 0-1-2 > 我们的 0-1-1）→ 多余 padding 导致空行和左侧空格
+2. `white-space: pre-wrap` + `word-break: break-all` → 长行自动折行
+
+**修复**：
+- `.codeBlock code:global(.hljs)` 选择器（0-2-1）覆盖 highlight.js 默认 padding
+- 重置 `padding: 0; margin: 0; background: transparent; color: #c9d1d9; border-radius: 0`
+- `white-space: pre; overflow-x: auto` 改为横向滚动条
