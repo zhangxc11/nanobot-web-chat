@@ -678,9 +678,22 @@ class TestPeriodFilter:
         assert where == ''
         assert params == ()
 
+        # 1d: CST today 00:00, no extra days param
+        where, params = AnalyticsDB._period_filter('1d')
+        assert 'WHERE' in where
+        assert 'start of day' in where
+        assert params == ()
+
+        # 7d: CST 6 days back from today
         where, params = AnalyticsDB._period_filter('7d')
         assert 'WHERE' in where
-        assert '-7 days' in params[0]
+        assert 'start of day' in where
+        assert params == ('-6 days',)
+
+        # 30d: CST 29 days back from today
+        where, params = AnalyticsDB._period_filter('30d')
+        assert 'WHERE' in where
+        assert params == ('-29 days',)
 
         where, params = AnalyticsDB._period_filter('invalid')
         assert where == ''

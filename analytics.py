@@ -127,6 +127,11 @@ class AnalyticsDB:
     def _period_filter(period: str | None) -> tuple[str, tuple]:
         """Build a SQL WHERE clause for time period filtering.
 
+        Uses CST (UTC+8) natural-day boundaries for stable results:
+        - '1d': from CST today 00:00 (= UTC yesterday 16:00) to now
+        - '7d': from CST 7 days ago 00:00 to now
+        - '30d': from CST 30 days ago 00:00 to now
+
         Args:
             period: '1d', '7d', '30d', or None/'all' for no filter.
 
@@ -135,11 +140,21 @@ class AnalyticsDB:
         """
         if not period or period == 'all':
             return '', ()
-        days_map = {'1d': 1, '7d': 7, '30d': 30}
-        days = days_map.get(period)
-        if days is None:
+        days_map = {'1d': 0, '7d': 6, '30d': 29}
+        days_back = days_map.get(period)
+        if days_back is None:
             return '', ()
-        return 'WHERE started_at >= datetime("now", ?)', (f'-{days} days',)
+        # CST 00:00 = UTC previous day 16:00
+        # Start of CST today in UTC: datetime('now', '+8 hours', 'start of day', '-8 hours')
+        # Then subtract days_back more days for 7d/30d
+        if days_back == 0:
+            # CST today 00:00 in UTC
+            return ("WHERE started_at >= datetime('now', '+8 hours', 'start of day', '-8 hours')", ())
+        else:
+            return (
+                "WHERE started_at >= datetime('now', '+8 hours', 'start of day', '-8 hours', ?)",
+                (f'-{days_back} days',),
+            )
 
     # ── Read: Global ──
 

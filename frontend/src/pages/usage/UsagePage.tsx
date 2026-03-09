@@ -400,6 +400,9 @@ export default function UsagePage() {
             </button>
           ))}
         </div>
+        <div className={styles.periodHint}>
+          数据按北京时间 (CST) 自然日统计，「过去一天」= 今日 00:00 起
+        </div>
 
         {/* Summary Cards */}
         <div className={styles.cards}>

@@ -2157,6 +2157,12 @@ nanobot core §32 在 LLM provider 层新增了 `cache_creation_input_tokens` / 
 - 后端 API 扩展：`GET /api/usage/daily?period=1d|7d|30d|all`
 - 默认选中"历史累计"，保持向后兼容
 
+**时间口径**：
+- 采用 **CST (UTC+8) 自然日** 起点，非滑动窗口，保证同一天内多次刷新结果稳定
+- `1d` = CST 今天 00:00 至今；`7d` = CST 7 天前 00:00 至今（含今天共 7 天）；`30d` = CST 30 天前 00:00 至今（含今天共 30 天）
+- SQLite 实现：`datetime('now', '+8 hours', 'start of day', '-8 hours')` 计算 CST 当日零点对应的 UTC 时间
+- 前端时间段选择器下方显示口径说明文字
+
 #### 改进 2：按对话 — Session 父子聚合
 
 **现象**：按对话列表显示所有 session（含子 session），数量多达 300+，难以浏览。子 session 的用量应归入其最顶层父 session。
