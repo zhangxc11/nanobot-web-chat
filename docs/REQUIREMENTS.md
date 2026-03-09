@@ -2330,6 +2330,45 @@ nanobot 核心仓库 §35 将 subagent 回报消息的注入方式从 `role="sys
 
 ---
 
+## 四十三、前端 Markdown 渲染修复与消息复制 (v5.5)
+
+> Phase 54 — 3 项前端 Bug 修复 + 1 项功能增强
+
+### 背景
+
+1. **代码块缺少换行**：代码块（` ``` `）内容在页面上全部挤在一行，无换行
+2. **消息气泡缺少复制按钮**：用户需要手动选中文本才能复制
+3. **代码框复制出 `[object Object]`**：代码块的复制按钮复制出的是 `[object Object]` 而非代码文本
+
+### Issue 清单
+
+#### Issue #43-1: 代码块缺少换行 ⚠️ 未修复
+
+**现象**：代码块（` ``` ` 围栏语法）中的内容在页面上不换行，全部挤在一行。
+
+**根因**：
+- 组件中 `<pre>` 被替换为 `<>{children}</>`（透传），导致 `<code>` 外层没有 `<pre>` 标签
+- highlight.js 默认样式 `pre code.hljs { display: block; }` 因缺少 `<pre>` 祖先而不匹配
+- 自定义 CSS `.codeBlock code` 缺少 `white-space: pre` 声明
+- 结果：`<code>` 标签使用默认 `white-space: normal`，换行符被当作空格
+
+**修复方案**：在 `.codeBlock code` CSS 中添加 `white-space: pre-wrap`（保留换行，同时允许长行自动折行）
+
+#### Issue #43-2: 消息气泡复制按钮 ✅ 已修复
+
+hover 消息气泡时在右上角显示复制按钮，点击复制气泡全量文本。
+
+#### Issue #43-3: 代码框复制 `[object Object]` ✅ 已修复
+
+`rehype-highlight` 将代码文本转为 React 元素后，`String(children)` 输出 `[object Object]`。
+修复：用递归 `extractText()` 函数从 React 节点树提取纯文本。
+
+#### Issue #43-4: 普通文本单换行不渲染 ✅ 已修复
+
+Markdown 默认忽略单个换行符。添加 `remark-breaks` 插件使 `\n` 渲染为 `<br>`。
+
+---
+
 <!-- ═══════════════════════════════════════════════════════════════════════
   ⚠️ BACKLOG 区域 — 必须始终位于本文件最末尾！
   

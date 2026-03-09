@@ -2334,3 +2334,20 @@ nanobot 的 gateway、webserver、worker 日志散落在 `/tmp/` 目录下：
 
 ### Git
 - web-chat commit: `361e076`
+
+---
+
+## Phase 54: 前端 Markdown 渲染修复与消息复制 (v5.5)
+
+> 日期：2026-03-10
+> 需求：§四十三
+
+### 任务清单
+
+- [x] **T54.1** 安装 `remark-breaks` 依赖，添加到 MarkdownRenderer remarkPlugins (Issue #43-4)
+- [x] **T54.2** MarkdownRenderer 添加 `extractText()` 递归函数，修复代码框复制 (Issue #43-3)
+- [x] **T54.3** MessageItem 添加 `CopyButton` 组件 + CSS 样式 (Issue #43-2)
+- [ ] **T54.4** 🔜 `.codeBlock code` CSS 添加 `white-space: pre-wrap` 修复代码块换行 (Issue #43-1)
+- [ ] **T54.5** npm run build 验证
+- [ ] **T54.6** Git 提交（amend 到 620841c 或新 commit）
+- [ ] **T54.7** 更新 DEVLOG 记录结果
