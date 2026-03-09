@@ -273,6 +273,12 @@ export interface MessageGroup {
   messages: Message[];
 }
 
+/** Check if a message is a subagent/system inject notification (by content prefix) */
+function isSystemInjectByContent(content: string | ContentBlock[]): boolean {
+  const text = typeof content === 'string' ? content : getTextContent(content);
+  return text.startsWith('[Message from session');
+}
+
 export function groupMessages(messages: Message[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
   let i = 0;
@@ -280,15 +286,28 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
   while (i < messages.length) {
     const msg = messages[i];
 
-    if (msg.role === 'user' || msg.role === 'system-local') {
-      groups.push({ type: msg.role === 'system-local' ? 'system' : 'user', messages: [msg] });
+    if (msg.role === 'system-local') {
+      groups.push({ type: 'system', messages: [msg] });
       i++;
       continue;
     }
 
     // Injected system messages (subagent results, etc.) — show as notification card
+    // Supports both old role="system" and new role="user" with content prefix detection
     if (msg.role === 'system') {
       groups.push({ type: 'system-inject', messages: [msg] });
+      i++;
+      continue;
+    }
+
+    if (msg.role === 'user') {
+      // Check if this is a subagent notification disguised as user message
+      if (isSystemInjectByContent(msg.content)) {
+        groups.push({ type: 'system-inject', messages: [msg] });
+        i++;
+        continue;
+      }
+      groups.push({ type: 'user', messages: [msg] });
       i++;
       continue;
     }

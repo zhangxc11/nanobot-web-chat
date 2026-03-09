@@ -58,6 +58,7 @@
 | Phase 48: 全链路统一用 session.id 替代 sessionKey (§三十九 Issue #53) | ✅ 已完成 | main |
 | Phase 49: 用量统计页面增强 (§四十 Issue #54) | ✅ 已完成 | main |
 | Phase 50: System Inject 消息展示 (§四十一 Issue #55) | ✅ 已完成 | main |
+| Phase 51: Subagent 消息 Role 适配 (§四十二) | 🔜 进行中 | main |
 
 ---
 
@@ -2217,3 +2218,26 @@ Agent spawn subagent 后，subagent 完成时通过 SessionMessenger 注入 `rol
 - `frontend/src/pages/chat/MessageList.module.css` — 紫色通知卡片样式
 - `docs/REQUIREMENTS.md` — §四十一 Issue #55
 - `docs/DEVLOG.md` — Phase 50 记录
+
+---
+
+## Phase 51: Subagent 消息 Role 适配 — 内容前缀识别 (§四十二)
+
+> 日期：2026-03-09
+> 需求：REQUIREMENTS.md §四十二
+> 配合 nanobot 核心 §35，subagent 消息从 system role 改回 user role
+
+### 背景
+
+nanobot 核心 §35 将 subagent 回报消息从 `role="system"` 改回 `role="user"`（Anthropic API 会把 system 消息抽到 system prompt 导致 cache 失效）。web-chat 需要通过内容前缀（而非 role）识别 subagent 通知消息。
+
+### 任务清单
+
+- [ ] **T51.1** `worker.py` — WorkerSessionMessenger inject 改为 user role
+- [ ] **T51.2** `worker.py` — on_message 通过内容前缀识别 subagent 消息
+- [ ] **T51.3** `webserver.py` — 确认消息过滤保持兼容（system 保留）
+- [ ] **T51.4** `MessageItem.tsx` — groupMessages 通过前缀识别 user role 的 subagent 消息
+- [ ] **T51.5** 确认 strip_runtime_context 不误伤 `[Message from session`
+- [ ] **T51.6** TypeScript 编译 + Vite build
+- [ ] **T51.7** 后端测试 pytest
+- [ ] **T51.8** Git 提交

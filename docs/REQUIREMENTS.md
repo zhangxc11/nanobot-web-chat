@@ -2338,3 +2338,35 @@ nanobot core §32 在 LLM provider 层新增了 `cache_creation_input_tokens` / 
 | `frontend/src/pages/chat/MessageItem.tsx` | groupMessages + SystemInjectCard 组件 | 🟢 安全 |
 | `frontend/src/pages/chat/MessageList.tsx` | system-inject group 渲染 + progress 类型 | 🟢 安全 |
 | `frontend/src/pages/chat/MessageList.module.css` | 紫色通知卡片样式 | 🟢 安全 |
+
+---
+
+## 四十二、Subagent 消息 Role 适配 — 内容前缀识别 (v5.4)
+
+> 2026-03-09 配合 nanobot 核心 §35，适配 subagent 消息从 system role 改回 user role
+
+### 背景
+
+nanobot 核心仓库 §35 将 subagent 回报消息的注入方式从 `role="system"` 改回 `role="user"`。原因是 Anthropic API 会将 system 角色消息提升到 system prompt 中，导致 prompt cache 失效，增加不必要的 token 消耗。
+
+改动后，subagent 返回的消息在 JSONL 中将以 `role="user"` 存储，内容格式不变（仍以 `[Message from session ...]` 前缀开头）。
+
+### 前端适配方案
+
+**核心思路**：通过**内容前缀** `[Message from session` 识别 subagent 通知消息，而非依赖 `role`。
+
+#### 后端改动
+
+1. **worker.py `WorkerSessionMessenger.send_to_session`**：inject dict 的 role 从 `"system"` 改为 `"user"`
+2. **worker.py `on_message` 回调**：不再仅匹配 `role == 'system'`，改为对 user 和 system 角色的消息都检测 `[Message from session` 前缀。匹配到后发送与之前相同的 `system_inject` 类型 SSE progress 事件
+3. **webserver.py 消息过滤**：保留 `system` 在允许列表中（兼容旧 JSONL 数据），新数据的 user role 自然通过过滤
+
+#### 前端改动
+
+4. **MessageItem.tsx `groupMessages`**：对 `user` role 的消息，检测内容是否以 `[Message from session` 开头。如果匹配，归为 `system-inject` group（复用 SystemInjectCard）。同时保留 `system` role 的识别逻辑（兼容旧数据）
+
+#### 兼容性
+
+- **旧 JSONL 数据**：已有的 `role="system"` 消息仍通过 system role 识别，SystemInjectCard 正常展示
+- **新 JSONL 数据**：`role="user"` + `[Message from session` 前缀，通过内容前缀识别，同样使用 SystemInjectCard 展示
+- **strip_runtime_context**：只匹配 `[Runtime Context]` 模式，不影响 `[Message from session`

@@ -151,7 +151,7 @@ class WorkerSessionMessenger:
 
         if task and task['status'] == 'running':
             # Running → inject into the task's inject queue as system role dict
-            task['_inject_queue'].put({"role": "system", "content": prefixed})
+            task['_inject_queue'].put({"role": "user", "content": prefixed})
             logger.info(f"SessionMessenger: injected into running task {target_session_key}")
             return True
 
@@ -297,6 +297,25 @@ def _run_task_sdk(session_key: str, message: str, images: list[str] | None = Non
         async def on_message(self, message: dict) -> None:
             """Forward tool results and assistant thinking text as progress events."""
             role = message.get('role', '')
+            content = message.get('content', '')
+
+            # Detect subagent / system inject messages by content prefix,
+            # regardless of role (supports both old system role and new user role).
+            if isinstance(content, str) and content.startswith('[Message from session'):
+                import re as _re
+                _m = _re.match(r'^\[Message from session (.+?)\]\n(.*)', content, _re.DOTALL)
+                if _m:
+                    source, body = _m.group(1), _m.group(2)
+                else:
+                    source, body = 'system', content
+                progress_text = f"🤖 {source}: {body[:80]}"
+                task['progress'].append(progress_text)
+                _notify_sse(task, 'progress', {
+                    'text': progress_text,
+                    'type': 'system_inject',
+                    'content': content,
+                })
+                return
 
             if role == 'tool':
                 # Tool execution result — show as "↳ tool_name → summary"
@@ -314,15 +333,9 @@ def _run_task_sdk(session_key: str, message: str, images: list[str] | None = Non
                 })
 
             elif role == 'system':
-                # Subagent result or other system injection — send as dedicated SSE event
-                content = message.get('content', '')
-                import re as _re
-                _m = _re.match(r'^\[Message from session (.+?)\]\n(.*)', content, _re.DOTALL)
-                if _m:
-                    source, body = _m.group(1), _m.group(2)
-                else:
-                    source, body = 'system', content
-                progress_text = f"🤖 {source}: {body[:80]}"
+                # Legacy system messages that don't match the prefix pattern
+                # (should be rare after the prefix check above)
+                progress_text = f"🤖 system: {content[:80]}"
                 task['progress'].append(progress_text)
                 _notify_sse(task, 'progress', {
                     'text': progress_text,
