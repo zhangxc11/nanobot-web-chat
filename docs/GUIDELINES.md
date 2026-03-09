@@ -108,8 +108,8 @@ Step 4 (Web UI 安全执行): 验证 + 测试
 
 ### 3.1 日志文件位置
 
-- Webserver 日志：`/tmp/nanobot-webserver.log`
-- Worker 日志：`/tmp/nanobot-worker.log`
+- Webserver 日志：`~/.nanobot/logs/webserver.log`
+- Worker 日志：`~/.nanobot/logs/worker.log`
 
 ### 3.2 日志级别
 

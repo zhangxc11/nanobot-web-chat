@@ -36,7 +36,9 @@ for i, arg in enumerate(sys.argv):
     elif arg == '--daemonize':
         DAEMONIZE = True
 
-LOG_FILE = '/tmp/nanobot-worker.log'
+LOG_DIR = os.path.join(os.path.expanduser('~'), '.nanobot', 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, 'worker.log')
 
 # ── Logging setup ──
 logger = logging.getLogger('worker')
