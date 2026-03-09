@@ -58,7 +58,7 @@
 | Phase 48: 全链路统一用 session.id 替代 sessionKey (§三十九 Issue #53) | ✅ 已完成 | main |
 | Phase 49: 用量统计页面增强 (§四十 Issue #54) | ✅ 已完成 | main |
 | Phase 50: System Inject 消息展示 (§四十一 Issue #55) | ✅ 已完成 | main |
-| Phase 51: Subagent 消息 Role 适配 (§四十二) | 🔜 进行中 | main |
+| Phase 51: Subagent 消息 Role 适配 (§四十二) | ✅ 已完成 | main |
 
 ---
 
@@ -2233,11 +2233,21 @@ nanobot 核心 §35 将 subagent 回报消息从 `role="system"` 改回 `role="u
 
 ### 任务清单
 
-- [ ] **T51.1** `worker.py` — WorkerSessionMessenger inject 改为 user role
-- [ ] **T51.2** `worker.py` — on_message 通过内容前缀识别 subagent 消息
-- [ ] **T51.3** `webserver.py` — 确认消息过滤保持兼容（system 保留）
-- [ ] **T51.4** `MessageItem.tsx` — groupMessages 通过前缀识别 user role 的 subagent 消息
-- [ ] **T51.5** 确认 strip_runtime_context 不误伤 `[Message from session`
-- [ ] **T51.6** TypeScript 编译 + Vite build
-- [ ] **T51.7** 后端测试 pytest
-- [ ] **T51.8** Git 提交
+- [x] **T51.1** `worker.py` — WorkerSessionMessenger inject 改为 user role
+- [x] **T51.2** `worker.py` — on_message 通过内容前缀识别 subagent 消息
+- [x] **T51.3** `webserver.py` — 确认消息过滤保持兼容（system 保留）
+- [x] **T51.4** `MessageItem.tsx` — groupMessages 通过前缀识别 user role 的 subagent 消息
+- [x] **T51.5** 确认 strip_runtime_context 不误伤 `[Message from session`
+- [x] **T51.6** TypeScript 编译 + Vite build
+- [x] **T51.7** 后端测试 pytest
+- [x] **T51.8** Git 提交
+
+### 改动文件
+- `worker.py` — WorkerSessionMessenger inject role 改为 user + on_message 前缀识别
+- `webserver.py` — 无改动（system 已在过滤列表中，兼容旧数据）
+- `frontend/src/pages/chat/MessageItem.tsx` — groupMessages 新增 isSystemInjectByContent 前缀检测
+- `docs/REQUIREMENTS.md` — §四十二
+- `docs/DEVLOG.md` — Phase 51 记录
+
+### Git
+- web-chat commit: `c728f4b`
