@@ -2346,13 +2346,16 @@ nanobot 核心仓库 §35 将 subagent 回报消息的注入方式从 `role="sys
 
 **现象**：代码块（` ``` ` 围栏语法）中的内容在页面上不换行，全部挤在一行。
 
-**根因**：
-- 组件中 `<pre>` 被替换为 `<>{children}</>`（透传），导致 `<code>` 外层没有 `<pre>` 标签
-- highlight.js 默认样式 `pre code.hljs { display: block; }` 因缺少 `<pre>` 祖先而不匹配
-- 自定义 CSS `.codeBlock code` 缺少 `white-space: pre` 声明
-- 结果：`<code>` 标签使用默认 `white-space: normal`，换行符被当作空格
+**根因**（二次诊断修正）：
+- 原 `CodeBlock` 组件同时处理 fenced code block 和 inline code，通过 `className` 区分
+- 对于无语言标识的 fenced code block（` ``` ` 不带语言），rehype-highlight 不添加 class（`detect` 默认 false）
+- `className` 为空时，fenced code block 被错误地当作 inline code 渲染（`<code className={styles.inlineCode}>`）
+- inline code 没有 `white-space: pre-wrap`，导致换行丢失
 
-**修复方案**：在 `.codeBlock code` CSS 中添加 `white-space: pre-wrap`（保留换行，同时允许长行自动折行）
+**修复方案**：重构组件架构，将 fenced 和 inline 分离：
+- `FencedCodeBlock`（`components.pre`）：处理所有 fenced code block，天然不会混淆 inline code
+- `InlineCode`（`components.code`）：只处理 inline code
+- `<pre>` 标签保留（不再替换为 fragment），CSS 通过 `.codeBlockPre` 设置 `white-space: pre-wrap`
 
 #### Issue #43-2: 消息气泡复制按钮 ✅ 已修复
 

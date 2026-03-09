@@ -2367,4 +2367,23 @@ nanobot 的 gateway、webserver、worker 日志散落在 `/tmp/` 目录下：
 
 ### Git
 - `620841c` — Phase 54 初始修复（remark-breaks + extractText + CopyButton）
-- `a7ed4f3` — 代码块换行修复 + 文档补全
+- `a7ed4f3` — 代码块换行修复 + 文档补全（CSS-only 方案，未解决根因）
+
+### 二次诊断 — 代码块换行仍未修复
+
+**现象**：用户反馈 `webchat_1772810614` 中代码块仍然不换行。复制出来内容正确（有 `\n`），但页面显示挤在一行。
+
+**根因分析**：
+- 原 `CodeBlock` 组件通过 `className` 区分 fenced vs inline code
+- 无语言标识的 fenced code block（` ``` ` 不带语言），rehype-highlight 默认 `detect: false`，不添加 class
+- `className` 为空 → 走 `if (!className)` 分支 → 渲染为 inline code（无 `white-space: pre-wrap`）
+- 上一轮修复只给 `.codeBlock code` 加了 `white-space: pre-wrap`，但该选择器根本不匹配（因为走了 inline 分支）
+
+**修复方案**：重构组件架构
+- `FencedCodeBlock`（`components.pre`）：处理所有 fenced code block，保留 `<pre>` 标签
+- `InlineCode`（`components.code`）：只处理 inline code
+- CSS: 新增 `.codeBlockPre { white-space: pre-wrap; }`
+
+### 改动文件
+- `MarkdownRenderer.tsx` — 重构：CodeBlock 拆分为 FencedCodeBlock + InlineCode
+- `MarkdownRenderer.module.css` — 新增 `.codeBlockPre`，调整 `.codeBlock code`

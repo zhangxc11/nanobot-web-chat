@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, isValidElement, Children } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -28,10 +28,25 @@ function extractText(node: React.ReactNode): string {
   return '';
 }
 
-function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
+/**
+ * FencedCodeBlock — renders the <pre> wrapper for fenced code blocks (``` ... ```).
+ * The inner <code> is rendered as a plain element (not the InlineCode component)
+ * because react-markdown calls components.pre for fenced blocks, wrapping components.code.
+ * We handle the full code block UI here: header, copy button, and code content.
+ */
+function FencedCodeBlock({ children, ...props }: React.HTMLAttributes<HTMLPreElement> & { children?: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
-  const match = /language-(\w+)/.exec(className || '');
-  const lang = match ? match[1] : '';
+
+  // Extract language from the inner <code> element's className
+  let lang = '';
+  const childArray = Children.toArray(children);
+  if (childArray.length === 1 && isValidElement(childArray[0])) {
+    const codeEl = childArray[0] as React.ReactElement<{ className?: string; children?: React.ReactNode }>;
+    const match = /language-(\w+)/.exec(codeEl.props.className || '');
+    lang = match ? match[1] : '';
+  }
+
+  // Extract plain text for copy
   const codeStr = extractText(children).replace(/\n$/, '');
 
   const handleCopy = useCallback(() => {
@@ -41,11 +56,6 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
     });
   }, [codeStr]);
 
-  // Inline code (no language class, short)
-  if (!className) {
-    return <code className={styles.inlineCode} {...props}>{children}</code>;
-  }
-
   return (
     <div className={styles.codeBlock}>
       <div className={styles.codeHeader}>
@@ -54,18 +64,24 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
           {copied ? '✓ 已复制' : '复制'}
         </button>
       </div>
-      <code className={className} {...props}>
+      <pre className={styles.codeBlockPre} {...props}>
         {children}
-      </code>
+      </pre>
     </div>
   );
 }
 
+/**
+ * InlineCode — renders inline `code` spans only.
+ * Fenced code blocks are fully handled by FencedCodeBlock (components.pre).
+ */
+function InlineCode({ children, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
+  return <code className={styles.inlineCode} {...props}>{children}</code>;
+}
+
 const components: Partial<Components> = {
-  pre({ children }) {
-    return <>{children}</>;
-  },
-  code: CodeBlock as Components['code'],
+  pre: FencedCodeBlock as Components['pre'],
+  code: InlineCode as Components['code'],
 };
 
 export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
