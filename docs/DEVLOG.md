@@ -2404,3 +2404,27 @@ nanobot 的 gateway、webserver、worker 日志散落在 `/tmp/` 目录下：
 - `.codeBlock code:global(.hljs)` 选择器（0-2-1）覆盖 highlight.js 默认 padding
 - 重置 `padding: 0; margin: 0; background: transparent; color: #c9d1d9; border-radius: 0`
 - `white-space: pre; overflow-x: auto` 改为横向滚动条
+
+### 四次修复：代码块溢出撑大消息气泡
+
+**用户反馈**：包含长行的代码块会撑大消息气泡超出右边界，预期是气泡宽度不变，代码块内部出现横向滚动条。
+
+**根因**：flex 布局中子元素默认 `min-width: auto`，`<pre>` 的宽内容逐级撑大 `.codeBlock` → `.markdown` → `.bubble` → `.message`，突破 `max-width: 85%` 约束。
+
+**修复**：
+- `.bubble` 加 `min-width: 0`（允许 flex 子元素收缩）
+- `.markdown` 加 `overflow: hidden; min-width: 0`（约束代码块在容器内）
+
+### 改动文件汇总
+- `MarkdownRenderer.tsx` — 重构 FencedCodeBlock + CodeElement 组件
+- `MarkdownRenderer.module.css` — hljs padding 覆盖、横向滚动、容器 overflow 约束
+- `MessageList.module.css` — `.bubble` 加 `min-width: 0`
+
+### Git
+- `5e3541c` — 代码块换行修复：FencedCodeBlock + InlineCode 拆分
+- `a53262e` — 代码块多余 padding/空行修复 + 长行横向滚动
+- `cfe618c` — DEVLOG 补充
+- `7d8c741` — 代码块溢出修复：约束气泡宽度
+
+### 结果
+✅ Phase 54 全部完成（7 个 Issue 全部修复）
