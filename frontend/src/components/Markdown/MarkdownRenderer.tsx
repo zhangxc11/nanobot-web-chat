@@ -29,10 +29,10 @@ function extractText(node: React.ReactNode): string {
 }
 
 /**
- * FencedCodeBlock — renders the <pre> wrapper for fenced code blocks (``` ... ```).
- * The inner <code> is rendered as a plain element (not the InlineCode component)
- * because react-markdown calls components.pre for fenced blocks, wrapping components.code.
- * We handle the full code block UI here: header, copy button, and code content.
+ * FencedCodeBlock — renders the <pre> wrapper for fenced code blocks.
+ *
+ * react-markdown calls: components.pre → wraps → components.code
+ * So children here is <CodeElement className="language-xxx">...</CodeElement>
  */
 function FencedCodeBlock({ children, ...props }: React.HTMLAttributes<HTMLPreElement> & { children?: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
@@ -46,7 +46,7 @@ function FencedCodeBlock({ children, ...props }: React.HTMLAttributes<HTMLPreEle
     lang = match ? match[1] : '';
   }
 
-  // Extract plain text for copy
+  // Extract plain text for copy (strip trailing newline)
   const codeStr = extractText(children).replace(/\n$/, '');
 
   const handleCopy = useCallback(() => {
@@ -72,16 +72,46 @@ function FencedCodeBlock({ children, ...props }: React.HTMLAttributes<HTMLPreEle
 }
 
 /**
- * InlineCode — renders inline `code` spans only.
- * Fenced code blocks are fully handled by FencedCodeBlock (components.pre).
+ * CodeElement — handles both inline code and fenced code block's inner <code>.
+ *
+ * For fenced code blocks: wrapped inside FencedCodeBlock's <pre>, className
+ * may contain "language-xxx" or "hljs". Styling is handled by `.codeBlock code` CSS.
+ *
+ * For inline code: standalone <code>, gets `.inlineCode` class.
+ *
+ * Distinction: fenced code blocks always have a className (from rehype-highlight
+ * or react-markdown's language- prefix). Inline code has no className.
+ * Exception: plain ``` blocks without language — but those are still wrapped
+ * in <pre> (FencedCodeBlock), so even without className they render correctly
+ * via `.codeBlock code` CSS. We add inlineCode class only when no className
+ * is present, which is fine because inside .codeBlock the more specific
+ * `.codeBlock code` selector overrides `.inlineCode` anyway.
+ *
+ * Actually, the simplest approach: never add inlineCode class inside a code block.
+ * We detect "inside pre" by checking if node's parent is pre (via the node prop).
  */
-function InlineCode({ children, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
+function CodeElement({
+  children,
+  className,
+  node: _node,
+  ...props
+}: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode; node?: unknown }) {
+  // If className exists, this is likely a fenced code block's <code> (has language-xxx or hljs)
+  // Render plain <code> and let .codeBlock code CSS handle it
+  if (className) {
+    return <code className={className} {...props}>{children}</code>;
+  }
+
+  // No className: could be inline code OR plain fenced block (``` without language).
+  // For plain fenced blocks, FencedCodeBlock wraps this in <pre>, and
+  // .codeBlock code CSS will style it correctly regardless of inlineCode class.
+  // So we can safely add inlineCode class — it will be overridden by .codeBlock code.
   return <code className={styles.inlineCode} {...props}>{children}</code>;
 }
 
 const components: Partial<Components> = {
   pre: FencedCodeBlock as Components['pre'],
-  code: InlineCode as Components['code'],
+  code: CodeElement as Components['code'],
 };
 
 export default function MarkdownRenderer({ content }: MarkdownRendererProps) {

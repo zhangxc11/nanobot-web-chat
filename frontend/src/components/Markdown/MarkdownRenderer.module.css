@@ -103,18 +103,24 @@
   font-size: 13px;
 }
 
-.codeBlock code {
+.codeBlock code,
+.codeBlock code:global(.hljs) {
   display: block;
-  overflow-x: auto;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   line-height: 1.5;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: #c9d1d9;
+  border-radius: 0;
+  font-size: inherit;
 }
 
 .codeBlockPre {
   margin: 0;
   padding: 12px 16px;
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: pre;
+  overflow-x: auto;
 }
 
 .codeHeader {
