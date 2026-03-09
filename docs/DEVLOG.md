@@ -2347,7 +2347,24 @@ nanobot 的 gateway、webserver、worker 日志散落在 `/tmp/` 目录下：
 - [x] **T54.1** 安装 `remark-breaks` 依赖，添加到 MarkdownRenderer remarkPlugins (Issue #43-4)
 - [x] **T54.2** MarkdownRenderer 添加 `extractText()` 递归函数，修复代码框复制 (Issue #43-3)
 - [x] **T54.3** MessageItem 添加 `CopyButton` 组件 + CSS 样式 (Issue #43-2)
-- [ ] **T54.4** 🔜 `.codeBlock code` CSS 添加 `white-space: pre-wrap` 修复代码块换行 (Issue #43-1)
-- [ ] **T54.5** npm run build 验证
-- [ ] **T54.6** Git 提交（amend 到 620841c 或新 commit）
-- [ ] **T54.7** 更新 DEVLOG 记录结果
+- [x] **T54.4** `.codeBlock code` CSS 添加 `white-space: pre-wrap` + `word-break: break-all` 修复代码块换行 (Issue #43-1)
+- [x] **T54.5** npm run build 验证 ✅
+- [x] **T54.6** Git commit: `a7ed4f3`
+- [x] **T54.7** 更新 DEVLOG 记录结果
+
+### 根因分析
+
+代码块换行丢失的根因：
+1. `MarkdownRenderer` 的 `components.pre` 将 `<pre>` 替换为 `<>{children}</>`（透传 fragment）
+2. highlight.js 默认样式 `pre code.hljs { display: block; }` 因缺少 `<pre>` 祖先而不匹配
+3. 自定义 CSS `.codeBlock code` 也没有 `white-space` 声明
+4. `<code>` 标签默认 `white-space: normal`，换行符被当作空格
+
+### 改动文件
+- `frontend/src/components/Markdown/MarkdownRenderer.module.css` — 添加 `white-space: pre-wrap` + `word-break: break-all`
+- `docs/REQUIREMENTS.md` — 新增 §四十三
+- `docs/DEVLOG.md` — Phase 54 记录
+
+### Git
+- `620841c` — Phase 54 初始修复（remark-breaks + extractText + CopyButton）
+- `a7ed4f3` — 代码块换行修复 + 文档补全
