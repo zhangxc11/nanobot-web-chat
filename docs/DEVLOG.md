@@ -54,7 +54,7 @@
 | Phase 45: restart.sh 进程发现与健康检查修复 (§三十七 Issue #51) | ✅ 已完成 | main |
 | Phase 46: Session Tag — done 标记与过滤 (§三十八 Issue #52) | ✅ 已完成 | main |
 | Phase 47: Bug 修复 — 后端不可达时消息静默丢失 | ✅ 已完成 | main |
-| Phase 48: 全链路统一用 session.id 替代 sessionKey (§三十九 Issue #53) | 🔜 进行中 | main |
+| Phase 48: 全链路统一用 session.id 替代 sessionKey (§三十九 Issue #53) | ✅ 已完成 | main |
 
 ---
 
@@ -1321,40 +1321,49 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 
 #### Phase 1: 前端改动（修复核心 bug）
 
-- [ ] **T48.1** `SessionList.tsx` — `buildSessionTree()` 全部改用 `id`
+- [x] **T48.1** `SessionList.tsx` — `buildSessionTree()` 全部改用 `id`
   - `nodeByKey` key 改为 `s.id`
   - `allSessionKeys` → `allSessionIds`，收集 `s.id`
   - `childSessionKeys` → `childSessionIds`，收集 `s.id`
   - `sessionByKey` 只写 `s.id`
 
-- [ ] **T48.2** `SessionList.tsx` — `resolveParent()` 改为基于 id 格式
+- [x] **T48.2** `SessionList.tsx` — `resolveParent()` 改为基于 id 格式
   - 参数从 `allSessionKeys` 改为 `allSessionIds: Set<string>`
   - 查找 parentMap 用 id
   - subagent 启发式：从 id 提取（`subagent_` 前缀，`_` 分隔）
   - webchat 启发式：从 id 提取（`webchat_` 前缀，`_` 分隔）
   - 精确匹配 `endsWith('_' + ts)` 替代 `endsWith(':' + ts)`
 
-- [ ] **T48.3** `SessionList.tsx` — `getChannel()` 改为从 id 提取
+- [x] **T48.3** `SessionList.tsx` — `getChannel()` 改为从 id 提取
   - 取第一个 `_` 或 `.` 之前的部分作为 channel
 
-- [ ] **T48.4** `SessionList.tsx` — 所有 React key、expandedKeys、tagsMap 查找改用 id
+- [x] **T48.4** `SessionList.tsx` — 所有 React key、expandedKeys、tagsMap 查找改用 id
 
-- [ ] **T48.5** `sessionStore.ts` — `toggleDone()` 中 key 改用 `session.id`
+- [x] **T48.5** `sessionStore.ts` — `toggleDone()` 中 key 改用 `session.id`
 
 #### Phase 2: 后端 + 数据迁移
 
-- [ ] **T48.6** `webserver.py` — `_handle_patch_tags()` 改为直接用 `session_id` 存 tags
+- [x] **T48.6** `webserver.py` — `_handle_patch_tags()` 改为直接用 `session_id` 存 tags
 
-- [ ] **T48.7** 迁移脚本 — `migrate_session_keys_to_ids.py`
+- [x] **T48.7** 迁移脚本 — `migrate_session_keys_to_ids.py`
   - 扫描所有 JSONL 建立 `sessionKey → [id...]` 映射
   - 迁移 `session_tags.json`：sessionKey → id（重复 key 的 tags 复制到每个 id）
   - 迁移 `session_parents.json`：key 和 value 都从 sessionKey 转为 id
   - 版本检测：webserver 启动时检查 tags/parents 是否含有 `:` 格式的 key，报错引导迁移
+  - 迁移结果：96 个 sessionKey 格式 → 101 个 id 格式（tags），103 个 key + 105 个 value（parents）
 
 #### Phase 3: 清理验证
 
-- [ ] **T48.8** TypeScript 编译 + Vite build 通过
-- [ ] **T48.9** Git 提交
+- [x] **T48.8** TypeScript 编译 + Vite build 通过
+- [x] **T48.9** Git 提交 — commit `5b17ad8`
+
+### 改动文件
+- `frontend/src/pages/chat/Sidebar/SessionList.tsx` — getChannel/resolveParent/buildSessionTree 全面改用 id
+- `frontend/src/store/sessionStore.ts` — toggleDone 改用 session.id
+- `webserver.py` — _handle_patch_tags 改为直接用 session_id 存 tags
+- `migrate_session_keys_to_ids.py` — 迁移脚本（新建）
+- `docs/REQUIREMENTS.md` — §三十九 Issue #53
+- `docs/DEVLOG.md` — Phase 48 记录
 
 ---
 
