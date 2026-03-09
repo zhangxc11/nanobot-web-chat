@@ -1611,4 +1611,72 @@ Sidebar 顶部:
 
 ---
 
+## 十八、Cache Usage 字段与 SQLite Migration (§三十九附)
+
+### 18.1 Schema 变更
+
+`token_usage` 表新增两列：
+
+```sql
+cache_creation_input_tokens INTEGER DEFAULT 0
+cache_read_input_tokens     INTEGER DEFAULT 0
+```
+
+### 18.2 Migration 策略
+
+与 nanobot core 的 `UsageRecorder._migrate()` 相同策略：
+
+```python
+_MIGRATION_SQL = [
+    "ALTER TABLE token_usage ADD COLUMN cache_creation_input_tokens INTEGER DEFAULT 0",
+    "ALTER TABLE token_usage ADD COLUMN cache_read_input_tokens INTEGER DEFAULT 0",
+]
+
+@staticmethod
+def _migrate(conn):
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(token_usage)")}
+    for sql in _MIGRATION_SQL:
+        col_name = sql.split("ADD COLUMN")[1].strip().split()[0]
+        if col_name not in existing:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # 并发竞争兜底
+```
+
+三种部署场景：
+| 场景 | 行为 |
+|------|------|
+| 全新部署 | `CREATE TABLE` 已含 cache 列，`_migrate()` 检测到列已存在，跳过 |
+| 旧数据库升级 | `_migrate()` 检测到列缺失，`ALTER TABLE ADD COLUMN`，旧行默认 0 |
+| 重复执行 | 幂等，不报错 |
+
+### 18.3 数据流
+
+```
+nanobot core agent/loop.py
+  └─ UsageRecorder.record() → 直接写入 analytics.db（含 cache 字段）
+
+worker.py on_usage() callback
+  └─ 透传 cache 字段 → SSE event → 前端实时显示
+
+webserver.py _try_record_usage()
+  └─ NO-OP（usage 由 core 直接写入，避免重复）
+
+前端读取路径：
+  GET /api/usage → AnalyticsDB.get_global_usage() → 含 cache 聚合
+  GET /api/sessions/:id/usage → AnalyticsDB.get_session_usage() → 含 cache 明细
+```
+
+### 18.4 前端展示
+
+| 组件 | 展示内容 |
+|------|----------|
+| UsageIndicator（折叠） | 上下文长度 = prompt_tokens |
+| UsageIndicator（展开） | cache_creation / cache_read 明细 |
+| UsagePage | cache 汇总卡片（总创建 / 总读取） |
+| MessageItem | 工具调用摘要中显示 cache hit/creation |
+
+---
+
 *本文档将随开发进展持续更新。*

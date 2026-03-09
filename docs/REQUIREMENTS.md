@@ -2068,6 +2068,35 @@ kill 进程后，额外检查端口是否已释放：
 
 ---
 
+## 三十九（附）、Cache Usage 字段 + 上下文长度展示 (v5.0.1)
+
+> 配合 nanobot core §32，web-chat 侧完成 cache 数据的接收、存储、查询和展示。
+
+### 背景
+
+nanobot core §32 在 LLM provider 层新增了 `cache_creation_input_tokens` / `cache_read_input_tokens` 字段，全链路传递到 `on_usage()` callback 和 `UsageRecorder`。web-chat 需要：
+1. **analytics.py**：schema 增加 cache 列 + migration + 所有查询方法聚合 cache 字段
+2. **worker.py**：`on_usage()` callback 透传 cache 字段到 SSE
+3. **前端**：api.ts 类型增加 cache 字段；UsageIndicator 展示上下文长度和 cache 命中；UsagePage 增加 cache 汇总卡片；MessageItem 工具摘要展示 cache 信息
+
+### 不做什么
+
+- `record_usage()` 无需接收 cache 参数 — usage 由 nanobot core 的 `UsageRecorder` 直接写入 SQLite，webserver `_try_record_usage()` 已是 no-op
+- 不做 cache 命中率告警
+
+### 影响范围
+
+| 文件 | 改动 |
+|------|------|
+| `analytics.py` | schema + `_MIGRATION_SQL` + `_migrate()` + 所有查询方法增加 cache 聚合 |
+| `worker.py` | `on_usage()` 增加 `cache_creation_input_tokens` / `cache_read_input_tokens` 透传 |
+| `frontend/src/services/api.ts` | Usage 接口增加可选 cache 字段 |
+| `frontend/src/pages/chat/Sidebar/UsageIndicator.tsx` | 折叠态显示上下文长度；展开态显示 cache 明细 |
+| `frontend/src/pages/usage/UsagePage.tsx` | 增加 cache 汇总卡片 |
+| `frontend/src/pages/chat/MessageItem.tsx` | 工具摘要增加 cache 信息 |
+
+---
+
 ## 三十九、全链路统一用 session.id 替代 sessionKey (v5.1)
 
 > 2026-03-09 修复飞书旧 session 的 sessionKey 重复导致列表渲染异常

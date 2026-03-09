@@ -54,6 +54,7 @@
 | Phase 45: restart.sh 进程发现与健康检查修复 (§三十七 Issue #51) | ✅ 已完成 | main |
 | Phase 46: Session Tag — done 标记与过滤 (§三十八 Issue #52) | ✅ 已完成 | main |
 | Phase 47: Bug 修复 — 后端不可达时消息静默丢失 | ✅ 已完成 | main |
+| Phase 47.5: Cache Usage 字段 + 上下文长度展示 (§三十九附) | ✅ 已完成 | main |
 | Phase 48: 全链路统一用 session.id 替代 sessionKey (§三十九 Issue #53) | ✅ 已完成 | main |
 
 ---
@@ -1308,6 +1309,39 @@ Phase 24 SDK 化后，nanobot agent 运行在 worker 进程内。Phase 26 和 Ph
 ---
 
 *每次 session 更新此文件后 commit。*
+
+---
+
+## Phase 47.5: Cache Usage 字段 + 上下文长度展示 (§三十九附)
+
+> 日期：2026-03-09
+> 需求：REQUIREMENTS.md §三十九（附） / nanobot core §32 配套
+> 架构：ARCHITECTURE.md §十八
+> Commit：`a4ba99e`
+
+### 概述
+
+配合 nanobot core §32 cache control 策略优化，web-chat 侧完成 cache 数据的存储、查询和前端展示。
+
+### 改动
+
+#### 1. analytics.py — schema + migration + 查询
+- Schema 新增 `cache_creation_input_tokens` / `cache_read_input_tokens` 列 (DEFAULT 0)
+- `_MIGRATION_SQL` + `_migrate()` 自动升级旧数据库
+- 所有查询方法 (get_global_usage, get_session_usage, get_daily_usage, by_model, by_session) 增加 cache 字段聚合
+
+#### 2. worker.py — on_usage callback
+- `on_usage()` 透传 `cache_creation_input_tokens` / `cache_read_input_tokens` 到 SSE
+
+#### 3. 前端 — api.ts + 3 个组件
+- `api.ts`: Usage 接口增加可选 cache 字段
+- `UsageIndicator`: 折叠态显示上下文长度；展开态显示 cache 明细
+- `UsagePage`: 增加 cache 汇总卡片
+- `MessageItem`: 工具摘要增加 cache 信息
+
+### 测试
+
+- ✅ `test_analytics.py` 新增 10 个 cache 测试 (TestCacheFields × 7 + TestCacheMigration × 3)，总计 36 passed
 
 ---
 

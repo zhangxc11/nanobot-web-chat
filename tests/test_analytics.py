@@ -9,6 +9,7 @@ Run: cd web-chat && python3 -m pytest tests/ -v
 
 import json
 import os
+import sqlite3
 import tempfile
 
 import pytest
@@ -464,3 +465,202 @@ class TestEdgeCases:
         result = db.get_session_usage("s1")
         assert result["total_tokens"] == 0
         assert len(result["records"]) == 1
+
+
+# ── Cache Fields Tests ──
+
+class TestCacheFields:
+    """Tests for cache_creation_input_tokens / cache_read_input_tokens columns."""
+
+    def test_schema_has_cache_columns(self, db):
+        """Fresh DB should have cache columns in schema."""
+        conn = db._connect()
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(token_usage)")}
+        assert "cache_creation_input_tokens" in cols
+        assert "cache_read_input_tokens" in cols
+
+    def test_default_cache_values_in_record(self, db):
+        """record_usage() without cache params should default to 0."""
+        db.record_usage("s1", "m1", 100, 50, 150, 1,
+                       "2026-01-01T00:00:00", "2026-01-01T00:00:30")
+        conn = db._connect()
+        row = conn.execute(
+            "SELECT cache_creation_input_tokens, cache_read_input_tokens FROM token_usage WHERE id=1"
+        ).fetchone()
+        assert row["cache_creation_input_tokens"] == 0
+        assert row["cache_read_input_tokens"] == 0
+
+    def test_global_usage_includes_cache_totals(self, db):
+        """get_global_usage() should include cache aggregation."""
+        result = db.get_global_usage()
+        assert "total_cache_creation_input_tokens" in result
+        assert "total_cache_read_input_tokens" in result
+        assert result["total_cache_creation_input_tokens"] == 0
+        assert result["total_cache_read_input_tokens"] == 0
+
+    def test_global_usage_cache_aggregation_with_data(self, db):
+        """Cache totals should aggregate correctly across records."""
+        # Simulate nanobot core writing cache data directly to SQLite
+        conn = db._connect()
+        conn.execute(
+            """INSERT INTO token_usage
+               (session_key, model, prompt_tokens, completion_tokens, total_tokens,
+                llm_calls, started_at, finished_at,
+                cache_creation_input_tokens, cache_read_input_tokens)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("s1", "claude-opus-4-6", 10000, 2000, 12000, 3,
+             "2026-03-09T10:00:00", "2026-03-09T10:01:00", 5000, 3000),
+        )
+        conn.execute(
+            """INSERT INTO token_usage
+               (session_key, model, prompt_tokens, completion_tokens, total_tokens,
+                llm_calls, started_at, finished_at,
+                cache_creation_input_tokens, cache_read_input_tokens)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("s1", "claude-opus-4-6", 15000, 3000, 18000, 5,
+             "2026-03-09T11:00:00", "2026-03-09T11:02:00", 2000, 8000),
+        )
+        conn.commit()
+
+        result = db.get_global_usage()
+        assert result["total_cache_creation_input_tokens"] == 7000  # 5000+2000
+        assert result["total_cache_read_input_tokens"] == 11000  # 3000+8000
+
+    def test_session_usage_includes_cache_fields(self, db):
+        """get_session_usage() records should include cache fields."""
+        conn = db._connect()
+        conn.execute(
+            """INSERT INTO token_usage
+               (session_key, model, prompt_tokens, completion_tokens, total_tokens,
+                llm_calls, started_at, finished_at,
+                cache_creation_input_tokens, cache_read_input_tokens)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("s1", "m1", 100, 50, 150, 1,
+             "2026-03-09T10:00:00", "2026-03-09T10:00:30", 30, 20),
+        )
+        conn.commit()
+
+        result = db.get_session_usage("s1")
+        assert len(result["records"]) == 1
+        rec = result["records"][0]
+        assert rec["cache_creation_input_tokens"] == 30
+        assert rec["cache_read_input_tokens"] == 20
+
+    def test_daily_usage_includes_cache_fields(self, db):
+        """get_daily_usage() should include cache aggregation per day."""
+        conn = db._connect()
+        conn.execute(
+            """INSERT INTO token_usage
+               (session_key, model, prompt_tokens, completion_tokens, total_tokens,
+                llm_calls, started_at, finished_at,
+                cache_creation_input_tokens, cache_read_input_tokens)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("s1", "m1", 100, 50, 150, 1,
+             "2026-03-09T10:00:00", "2026-03-09T10:00:30", 40, 60),
+        )
+        conn.commit()
+
+        result = db.get_daily_usage(days=7)
+        assert len(result) == 1
+        assert result[0]["cache_creation_input_tokens"] == 40
+        assert result[0]["cache_read_input_tokens"] == 60
+
+    def test_by_model_includes_cache_fields(self, db):
+        """by_model in get_global_usage() should include cache aggregation."""
+        conn = db._connect()
+        conn.execute(
+            """INSERT INTO token_usage
+               (session_key, model, prompt_tokens, completion_tokens, total_tokens,
+                llm_calls, started_at, finished_at,
+                cache_creation_input_tokens, cache_read_input_tokens)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("s1", "claude-opus-4-6", 100, 50, 150, 1,
+             "2026-03-09T10:00:00", "2026-03-09T10:00:30", 10, 20),
+        )
+        conn.commit()
+
+        result = db.get_global_usage()
+        opus = result["by_model"]["claude-opus-4-6"]
+        assert opus["cache_creation_input_tokens"] == 10
+        assert opus["cache_read_input_tokens"] == 20
+
+
+class TestCacheMigration:
+    """Tests for _migrate() adding cache columns to old databases."""
+
+    def test_migration_adds_cache_columns(self):
+        """Fresh DB should have cache columns (CREATE TABLE includes them)."""
+        db = AnalyticsDB(db_path=":memory:")
+        conn = db._connect()
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(token_usage)")}
+        assert "cache_creation_input_tokens" in cols
+        assert "cache_read_input_tokens" in cols
+
+    def test_migration_on_file_db_without_cache_columns(self):
+        """File-based old DB without cache columns should be migrated."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "old.db")
+
+            # Create old-schema DB manually
+            conn = sqlite3.connect(db_path)
+            conn.executescript("""
+                CREATE TABLE token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_key TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    prompt_tokens INTEGER DEFAULT 0,
+                    completion_tokens INTEGER DEFAULT 0,
+                    total_tokens INTEGER DEFAULT 0,
+                    llm_calls INTEGER DEFAULT 0,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL
+                );
+            """)
+            conn.execute(
+                """INSERT INTO token_usage
+                   (session_key, model, prompt_tokens, completion_tokens,
+                    total_tokens, llm_calls, started_at, finished_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                ("old_session", "gpt-4", 100, 50, 150, 1,
+                 "2026-01-01T00:00:00", "2026-01-01T00:00:30"),
+            )
+            conn.commit()
+
+            # Verify old schema lacks cache columns
+            old_cols = {row[1] for row in conn.execute("PRAGMA table_info(token_usage)")}
+            assert "cache_creation_input_tokens" not in old_cols
+            conn.close()
+
+            # Open with AnalyticsDB — should trigger migration
+            db = AnalyticsDB(db_path=db_path)
+
+            # Verify columns now exist
+            conn2 = sqlite3.connect(db_path)
+            conn2.row_factory = sqlite3.Row
+            new_cols = {row[1] for row in conn2.execute("PRAGMA table_info(token_usage)")}
+            assert "cache_creation_input_tokens" in new_cols
+            assert "cache_read_input_tokens" in new_cols
+
+            # Old row should have default 0
+            row = conn2.execute(
+                "SELECT cache_creation_input_tokens, cache_read_input_tokens "
+                "FROM token_usage WHERE session_key='old_session'"
+            ).fetchone()
+            assert row[0] == 0
+            assert row[1] == 0
+            conn2.close()
+
+            # Queries should work
+            result = db.get_global_usage()
+            assert result["total_cache_creation_input_tokens"] == 0
+            assert result["total_cache_read_input_tokens"] == 0
+
+    def test_migration_idempotent(self):
+        """Running migration twice should not error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            db1 = AnalyticsDB(db_path=db_path)
+            # Second init triggers _migrate again
+            db2 = AnalyticsDB(db_path=db_path)
+            result = db2.get_global_usage()
+            assert result["total_cache_creation_input_tokens"] == 0
