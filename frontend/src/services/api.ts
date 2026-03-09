@@ -315,8 +315,9 @@ export interface DailyUsage {
   cache_read_input_tokens?: number;
 }
 
-export async function fetchUsage(): Promise<UsageStats> {
-  const res = await fetch(`${API_BASE}/usage`);
+export async function fetchUsage(period?: string): Promise<UsageStats> {
+  const params = period ? `?period=${period}` : '';
+  const res = await fetch(`${API_BASE}/usage${params}`);
   if (!res.ok) throw new Error(`Failed to fetch usage: ${res.status}`);
   return res.json();
 }
@@ -327,8 +328,10 @@ export async function fetchSessionUsage(sessionKey: string): Promise<SessionUsag
   return res.json();
 }
 
-export async function fetchDailyUsage(days: number = 30): Promise<DailyUsage[]> {
-  const res = await fetch(`${API_BASE}/usage/daily?days=${days}`);
+export async function fetchDailyUsage(days: number = 30, period?: string): Promise<DailyUsage[]> {
+  const params = new URLSearchParams({ days: String(days) });
+  if (period) params.set('period', period);
+  const res = await fetch(`${API_BASE}/usage/daily?${params}`);
   if (!res.ok) throw new Error(`Failed to fetch daily usage: ${res.status}`);
   const data = await res.json();
   return data.days;

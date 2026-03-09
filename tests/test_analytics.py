@@ -664,3 +664,97 @@ class TestCacheMigration:
             db2 = AnalyticsDB(db_path=db_path)
             result = db2.get_global_usage()
             assert result["total_cache_creation_input_tokens"] == 0
+
+
+class TestPeriodFilter:
+    """Test time period filtering for get_global_usage and get_daily_usage."""
+
+    def test_period_filter_helper(self):
+        where, params = AnalyticsDB._period_filter(None)
+        assert where == ''
+        assert params == ()
+
+        where, params = AnalyticsDB._period_filter('all')
+        assert where == ''
+        assert params == ()
+
+        where, params = AnalyticsDB._period_filter('7d')
+        assert 'WHERE' in where
+        assert '-7 days' in params[0]
+
+        where, params = AnalyticsDB._period_filter('invalid')
+        assert where == ''
+
+    def test_global_usage_with_period(self):
+        db = AnalyticsDB(db_path=":memory:")
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        old = now - timedelta(days=10)
+        recent = now - timedelta(hours=12)
+
+        db.record_usage("s1", "m1", 100, 50, 150, 1, old.isoformat(), old.isoformat())
+        db.record_usage("s2", "m1", 200, 100, 300, 1, recent.isoformat(), recent.isoformat())
+
+        # All time
+        r = db.get_global_usage(period='all')
+        assert r['total_tokens'] == 450
+
+        # Last day — only recent
+        r = db.get_global_usage(period='1d')
+        assert r['total_tokens'] == 300
+
+        # Last 7 days — only recent
+        r = db.get_global_usage(period='7d')
+        assert r['total_tokens'] == 300
+
+        # Last 30 days — both
+        r = db.get_global_usage(period='30d')
+        assert r['total_tokens'] == 450
+
+    def test_daily_usage_with_period(self):
+        db = AnalyticsDB(db_path=":memory:")
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        old = now - timedelta(days=10)
+        recent = now - timedelta(hours=6)
+
+        db.record_usage("s1", "m1", 100, 50, 150, 1, old.isoformat(), old.isoformat())
+        db.record_usage("s2", "m1", 200, 100, 300, 1, recent.isoformat(), recent.isoformat())
+
+        # All time
+        d = db.get_daily_usage(period='all')
+        assert len(d) >= 1
+
+        # Last day
+        d = db.get_daily_usage(period='1d')
+        total = sum(r['total_tokens'] for r in d)
+        assert total == 300
+
+    def test_global_usage_by_model_with_period(self):
+        db = AnalyticsDB(db_path=":memory:")
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        old = now - timedelta(days=10)
+        recent = now - timedelta(hours=6)
+
+        db.record_usage("s1", "old_model", 100, 50, 150, 1, old.isoformat(), old.isoformat())
+        db.record_usage("s2", "new_model", 200, 100, 300, 1, recent.isoformat(), recent.isoformat())
+
+        r = db.get_global_usage(period='1d')
+        assert 'new_model' in r['by_model']
+        assert 'old_model' not in r['by_model']
+
+    def test_global_usage_by_session_with_period(self):
+        db = AnalyticsDB(db_path=":memory:")
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        old = now - timedelta(days=10)
+        recent = now - timedelta(hours=6)
+
+        db.record_usage("old_session", "m1", 100, 50, 150, 1, old.isoformat(), old.isoformat())
+        db.record_usage("new_session", "m1", 200, 100, 300, 1, recent.isoformat(), recent.isoformat())
+
+        r = db.get_global_usage(period='1d')
+        session_ids = [s['session_id'] for s in r['by_session']]
+        assert 'new_session' in session_ids
+        assert 'old_session' not in session_ids

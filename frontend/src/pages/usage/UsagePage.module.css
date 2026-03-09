@@ -14,7 +14,7 @@
   font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 20px;
+  margin: 0 0 16px;
 }
 
 .loading,
@@ -23,6 +23,42 @@
   color: var(--text-muted);
   padding: 60px 20px;
   font-size: 14px;
+}
+
+/* ── Period Selector ── */
+
+.periodBar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.periodBtn {
+  flex: 1;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.periodBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.periodBtnActive {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 /* ── Summary Cards ── */
@@ -66,6 +102,15 @@
   font-weight: 600;
   color: var(--text-primary);
   margin: 0 0 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sessionCount {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
 /* ── Daily Trend Chart ── */
@@ -77,79 +122,37 @@
   padding: 16px;
 }
 
-.chartBars {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 160px;
-  padding-bottom: 4px;
-}
-
-.barGroup {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  height: 100%;
+.chartContainer {
   position: relative;
-  min-width: 0;
 }
 
-.barTooltip {
+.svgChart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chartTooltip {
   position: absolute;
-  top: -4px;
-  left: 50%;
-  transform: translateX(-50%) translateY(-100%);
+  top: 0;
+  transform: translateX(-50%);
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 10px;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;
-  opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s;
   z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  line-height: 1.5;
 }
 
-.barGroup:hover .barTooltip {
-  opacity: 1;
-}
-
-.barContainer {
-  flex: 1;
-  width: 100%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-
-.barFill {
-  width: 70%;
-  max-width: 24px;
-  min-width: 4px;
-  background: #60a5fa;
-  border-radius: 3px 3px 0 0;
-  position: relative;
-  overflow: hidden;
-  transition: height 0.3s ease;
-}
-
-.barInput {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: #3b82f6;
-  border-radius: 0 0 0 0;
-}
-
-.barLabel {
-  font-size: 9px;
-  color: var(--text-muted);
-  margin-top: 4px;
-  white-space: nowrap;
+.tooltipDate {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
 }
 
 .chartLegend {
@@ -167,18 +170,10 @@
   gap: 4px;
 }
 
-.legendDotInput {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: #3b82f6;
-}
-
-.legendDotOutput {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: #60a5fa;
+.legendLine {
+  width: 14px;
+  height: 3px;
+  border-radius: 1px;
 }
 
 /* ── Table ── */
@@ -238,11 +233,62 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .colNum {
   flex: 1;
   text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.childBadge {
+  display: inline-block;
+  font-size: 10px;
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.12);
+  border-radius: 8px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+/* ── Pagination ── */
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.pageBtn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pageBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.pageBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pageInfo {
+  font-size: 12px;
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -257,7 +303,12 @@
     font-size: 18px;
   }
 
-  .chartBars {
-    height: 120px;
+  .periodBar {
+    flex-wrap: wrap;
+  }
+
+  .periodBtn {
+    font-size: 12px;
+    padding: 5px 8px;
   }
 }

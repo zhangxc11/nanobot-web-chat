@@ -921,8 +921,9 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
     # ── Usage API handlers ──
 
     def _handle_get_usage(self, params):
-        """GET /api/usage[?session=<key>] — usage from SQLite analytics DB."""
+        """GET /api/usage[?session=<key>&period=<1d|7d|30d|all>] — usage from SQLite analytics DB."""
         session_key = params.get('session', [None])[0]
+        period = params.get('period', [None])[0]
         try:
             if session_key:
                 # Per-session usage
@@ -930,7 +931,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json(result)
             else:
                 # Global usage
-                result = analytics_db.get_global_usage()
+                result = analytics_db.get_global_usage(period=period)
                 self._enrich_session_summaries(result)
                 self._send_json(result)
         except Exception as e:
@@ -955,11 +956,12 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                 })
 
     def _handle_get_daily_usage(self, params):
-        """GET /api/usage/daily?days=30 — daily aggregated usage."""
+        """GET /api/usage/daily?days=30&period=<1d|7d|30d|all> — daily aggregated usage."""
         try:
             days = int(params.get('days', ['30'])[0])
             days = max(1, min(days, 365))  # Clamp to 1-365
-            result = analytics_db.get_daily_usage(days)
+            period = params.get('period', [None])[0]
+            result = analytics_db.get_daily_usage(days=days, period=period)
             self._send_json({'days': result})
         except Exception as e:
             logger.error(f"Failed to get daily usage: {e}")

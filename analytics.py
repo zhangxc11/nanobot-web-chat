@@ -121,26 +121,41 @@ class AnalyticsDB:
             )
             return cursor.lastrowid
 
+    # ── Helpers ──
+
+    @staticmethod
+    def _period_filter(period: str | None) -> tuple[str, tuple]:
+        """Build a SQL WHERE clause for time period filtering.
+
+        Args:
+            period: '1d', '7d', '30d', or None/'all' for no filter.
+
+        Returns:
+            (where_clause, params) tuple for use in SQL queries.
+        """
+        if not period or period == 'all':
+            return '', ()
+        days_map = {'1d': 1, '7d': 7, '30d': 30}
+        days = days_map.get(period)
+        if days is None:
+            return '', ()
+        return 'WHERE started_at >= datetime("now", ?)', (f'-{days} days',)
+
     # ── Read: Global ──
 
-    def get_global_usage(self) -> dict:
+    def get_global_usage(self, period: str | None = None) -> dict:
         """
         Aggregate usage across all sessions.
 
-        Returns dict compatible with existing GET /api/usage response format:
-        {
-            "total_prompt_tokens": int,
-            "total_completion_tokens": int,
-            "total_tokens": int,
-            "total_llm_calls": int,
-            "by_model": { model: { prompt_tokens, completion_tokens, total_tokens, llm_calls } },
-            "by_session": [ { session_id, total_tokens, prompt_tokens, completion_tokens, llm_calls, last_used } ],
-        }
+        Args:
+            period: Time period filter — '1d', '7d', '30d', or None/all.
         """
+        where_clause, params = self._period_filter(period)
+
         with self._connect() as conn:
             # Totals
             row = conn.execute(
-                """
+                f"""
                 SELECT COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
                        COALESCE(SUM(completion_tokens), 0) as total_completion_tokens,
                        COALESCE(SUM(total_tokens), 0) as total_tokens,
@@ -148,7 +163,9 @@ class AnalyticsDB:
                        COALESCE(SUM(cache_creation_input_tokens), 0) as total_cache_creation,
                        COALESCE(SUM(cache_read_input_tokens), 0) as total_cache_read
                 FROM token_usage
-                """
+                {where_clause}
+                """,
+                params,
             ).fetchone()
 
             totals = {
@@ -163,7 +180,7 @@ class AnalyticsDB:
             # By model
             by_model = {}
             for r in conn.execute(
-                """
+                f"""
                 SELECT model,
                        SUM(prompt_tokens) as prompt_tokens,
                        SUM(completion_tokens) as completion_tokens,
@@ -172,9 +189,11 @@ class AnalyticsDB:
                        SUM(cache_creation_input_tokens) as cache_creation_input_tokens,
                        SUM(cache_read_input_tokens) as cache_read_input_tokens
                 FROM token_usage
+                {where_clause}
                 GROUP BY model
                 ORDER BY total_tokens DESC
-                """
+                """,
+                params,
             ):
                 by_model[r["model"]] = {
                     "prompt_tokens": r["prompt_tokens"],
@@ -188,7 +207,7 @@ class AnalyticsDB:
             # By session
             by_session = []
             for r in conn.execute(
-                """
+                f"""
                 SELECT session_key,
                        SUM(prompt_tokens) as prompt_tokens,
                        SUM(completion_tokens) as completion_tokens,
@@ -198,9 +217,11 @@ class AnalyticsDB:
                        SUM(cache_read_input_tokens) as cache_read_input_tokens,
                        MAX(finished_at) as last_used
                 FROM token_usage
+                {where_clause}
                 GROUP BY session_key
                 ORDER BY total_tokens DESC
-                """
+                """,
+                params,
             ):
                 by_session.append({
                     "session_id": r["session_key"],
@@ -273,17 +294,36 @@ class AnalyticsDB:
 
     # ── Read: Daily ──
 
-    def get_daily_usage(self, days: int = 30) -> list:
+    def get_daily_usage(self, days: int = 30, period: str | None = None) -> list:
         """
-        Daily aggregated usage for the last N days.
+        Daily aggregated usage for the last N days or a period.
+
+        Args:
+            days: Number of days (legacy, used when period is None).
+            period: '1d', '7d', '30d', or None/'all'. Overrides days if set.
 
         Returns list of:
         [ { "date": "2026-02-26", "prompt_tokens": int, "completion_tokens": int,
             "total_tokens": int, "llm_calls": int } ]
         """
+        # Determine the WHERE clause
+        if period and period != 'all':
+            where_clause, params = self._period_filter(period)
+            # For daily, filter by date(started_at) for cleaner grouping
+            days_map = {'1d': 1, '7d': 7, '30d': 30}
+            d = days_map.get(period, days)
+            where_clause = "WHERE date(started_at) >= date('now', ?)"
+            params = (f'-{d} days',)
+        elif period == 'all':
+            where_clause = ''
+            params = ()
+        else:
+            where_clause = "WHERE date(started_at) >= date('now', ?)"
+            params = (f'-{days} days',)
+
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT date(started_at) as day,
                        SUM(prompt_tokens) as prompt_tokens,
                        SUM(completion_tokens) as completion_tokens,
@@ -292,11 +332,11 @@ class AnalyticsDB:
                        SUM(cache_creation_input_tokens) as cache_creation_input_tokens,
                        SUM(cache_read_input_tokens) as cache_read_input_tokens
                 FROM token_usage
-                WHERE date(started_at) >= date('now', ?)
+                {where_clause}
                 GROUP BY day
                 ORDER BY day ASC
                 """,
-                (f"-{days} days",),
+                params,
             ).fetchall()
 
             return [

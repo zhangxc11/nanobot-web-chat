@@ -2130,6 +2130,77 @@ nanobot core §32 在 LLM provider 层新增了 `cache_creation_input_tokens` / 
 
 ---
 
+## 四十、用量统计页面增强 (v5.2)
+
+> 2026-03-09 用量统计页面全面升级
+
+### Issue #54：用量统计页面增强 — 5 项改进
+
+**背景**：当前用量统计页面（UsagePage）功能基础，缺少时间筛选、Session 父子聚合、分页、趋势图优化等能力，数据量增长后体验下降。
+
+#### 改进 0：总量卡片增加"未缓存"指标
+
+**现象**：总量卡片显示了缓存命中和缓存写入，但缺少"未缓存"（既没命中也没写入缓存的输入 token）的显示。
+
+**解决方案**：
+- 新增"未缓存"卡片，值 = `prompt_tokens - cache_read - cache_creation`
+- 使用红色调显示，与缓存命中（绿色）、缓存写入（橙色）区分
+
+#### 改进 1：时间段筛选
+
+**现象**：用量统计只显示历史累计数据，无法查看特定时间段的用量。
+
+**解决方案**：
+- 页面顶部新增时间段选择器：`过去一天 | 过去一周 | 过去一个月 | 历史累计`
+- 选中时间段后，所有数据（总量卡片、按模型、按对话、每日趋势）联动筛选
+- 后端 API 扩展：`GET /api/usage?period=1d|7d|30d|all`
+- 后端 API 扩展：`GET /api/usage/daily?period=1d|7d|30d|all`
+- 默认选中"历史累计"，保持向后兼容
+
+#### 改进 2：按对话 — Session 父子聚合
+
+**现象**：按对话列表显示所有 session（含子 session），数量多达 300+，难以浏览。子 session 的用量应归入其最顶层父 session。
+
+**解决方案**：
+- 利用已有的 `session_parents.json` + 前端启发式规则，计算每个 session 的根父节点
+- 所有有父节点的 session，用量汇总到最源头的根父 session
+- 按对话表格只显示根 session（无父节点的 session）
+- 根 session 的用量 = 自身用量 + 所有后代 session 用量之和
+- 实现方式：后端返回原始 by_session 数据 + parentMap，前端做聚合计算
+
+#### 改进 3：按对话 — 分页
+
+**现象**：按对话列表一次性渲染所有 session，数据量大时页面卡顿。
+
+**解决方案**：
+- 前端分页，每页显示 20 条
+- 分页控件：`上一页 | 第 N/M 页 | 下一页`
+- 按 total_tokens 降序排列（已有）
+- 聚合后的根 session 列表分页
+
+#### 改进 4：每日趋势 — 曲线图 + 缓存命中
+
+**现象**：每日趋势使用直方图，数据点多时不够直观。缺少缓存命中趋势。
+
+**解决方案**：
+- 直方图改为 SVG 曲线图（折线图），使用 `<polyline>` 绘制
+- 三条曲线：总 token（蓝色）、输入 token（深蓝）、缓存命中 token（绿色）
+- 鼠标悬浮显示具体数值 tooltip
+- X 轴日期标签、Y 轴刻度线
+- 纯 SVG 实现，不引入图表库
+
+### 改动范围
+
+| 文件 | 改动 |
+|------|------|
+| `analytics.py` | `get_global_usage()` / `get_daily_usage()` 增加 `period` 参数 |
+| `webserver.py` | `/api/usage` / `/api/usage/daily` 解析 `period` 参数 |
+| `frontend/src/services/api.ts` | `fetchUsage()` / `fetchDailyUsage()` 增加 `period` 参数；`fetchSessionParents()` 复用 |
+| `frontend/src/pages/usage/UsagePage.tsx` | 时间段选择器 + 未缓存卡片 + Session 聚合 + 分页 + 曲线图 |
+| `frontend/src/pages/usage/UsagePage.module.css` | 新增样式 |
+
+---
+
 ### 手动维护的 backlog
 
 **note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
