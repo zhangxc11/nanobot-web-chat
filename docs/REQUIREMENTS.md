@@ -2224,49 +2224,6 @@ nanobot core §32 在 LLM provider 层新增了 `cache_creation_input_tokens` / 
 
 ---
 
-### 手动维护的 backlog
-
-**note** 这个部分会手动添加希望增加的功能backlog，被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明，比如增加对应的需求描述章节，或者增加带编号的issue，并且推进对应的开发项。必要的时候，可以在交互过程中，跟澄清需求。对应的需求更新之后，从backlog中移除。
-
-#### Backlog #17：API 子 Session 命名规范 Skill
-
-**来源**: B5 开发过程中用户提出 (2026-03-06)
-
-**背景**:
-- 当前 API 创建的子 session 命名是约定俗成的（如 `webchat:dispatch_*`, `webchat:worker_*`）
-- 缺少一个正式的 skill 来制定和强制执行命名规则
-- 后续批量构造、调度等场景需要统一的命名规范
-
-**需求**:
-1. 创建一个 skill，定义通过 API 创建子 session 的命名规则
-2. 规范格式：`webchat:<role>_<parent_ref>_<detail>`
-3. 定义合法的 role 列表（dispatch, worker, review, fix 等）
-4. 提供命名校验函数/工具
-
-**优先级**: 低（B5 前端辨识完成后再制定）
-
-#### Backlog #16：message tool 跨 Session 消息传递
-
-**来源**: eval-bench 批量测例构造设计 (2026-03-05)
-
-**背景**:
-- 当前 message tool 只能向当前 session 的用户发送消息
-- 调度 session / review session 完成后需要通知主 session
-- 当前只能通过文件系统间接协调，主 session 需要手动检查进度
-
-**需求**:
-1. **扩展 message tool**: 增加 `target_session` 参数，支持向指定 session 发送跨 session 消息
-2. **实现机制**: 通过 `MessageBus.publish_inbound(InboundMessage(channel="system"))` 注入目标 session
-3. **安全限制**: `target_session` 只允许 `web:*` 和 `webchat:*` channel
-4. **消息标识**: sender_id 标记来源 session，content 加前缀标识跨 session 消息
-5. **代码改动**: `agent/tools/message.py` (~30行) + `agent/loop.py` (传入 bus 引用)
-
-**涉及仓库**: nanobot 核心仓库 (非 web-chat)
-**优先级**: 中（eval-bench 批量构造 Phase 3 迭代时实现）
-**详细设计**: `eval-bench-data/batch_build/DESIGN.md` §4.2
-
----
-
 ## 四十一、System Inject 消息展示 (v5.3)
 
 > 2026-03-09 展示 subagent 返回等系统注入消息
@@ -2370,3 +2327,22 @@ nanobot 核心仓库 §35 将 subagent 回报消息的注入方式从 `role="sys
 - **旧 JSONL 数据**：已有的 `role="system"` 消息仍通过 system role 识别，SystemInjectCard 正常展示
 - **新 JSONL 数据**：`role="user"` + `[Message from session` 前缀，通过内容前缀识别，同样使用 SystemInjectCard 展示
 - **strip_runtime_context**：只匹配 `[Runtime Context]` 模式，不影响 `[Message from session`
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+  ⚠️ BACKLOG 区域 — 必须始终位于本文件最末尾！
+  
+  AI 注意：新增正式需求章节（## 标题）时，请插入到本 BACKLOG 区域 **之前**，
+  不要在 BACKLOG 之后追加任何内容。BACKLOG 是文件的终止锚点。
+  ═══════════════════════════════════════════════════════════════════════ -->
+
+## 📋 Backlog（手动维护）
+
+> **⚠️ 本区域必须始终位于文件最末尾。新增正式需求章节请插入到本区域之前的 `---` 分隔线上方。**
+>
+> 这里手动添加希望增加的功能 backlog。被任务激活后，参考下面的内容，按照合理逻辑更新前序需求文档说明（如增加对应的需求描述章节或带编号的 issue），并推进对应的开发项。必要时可在交互过程中澄清需求。对应的需求更新之后，从 backlog 中移除。
+
+（暂无）
+
+<!-- ⚠️ BACKLOG 结束 — 此行之后不得追加任何内容 -->

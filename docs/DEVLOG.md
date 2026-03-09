@@ -59,6 +59,7 @@
 | Phase 49: 用量统计页面增强 (§四十 Issue #54) | ✅ 已完成 | main |
 | Phase 50: System Inject 消息展示 (§四十一 Issue #55) | ✅ 已完成 | main |
 | Phase 51: Subagent 消息 Role 适配 (§四十二) | ✅ 已完成 | main |
+| Phase 52: REQUIREMENTS.md Backlog 区域重构 | ✅ 已完成 | main |
 
 ---
 
@@ -2251,3 +2252,27 @@ nanobot 核心 §35 将 subagent 回报消息从 `role="system"` 改回 `role="u
 
 ### Git
 - web-chat commit: `c728f4b`
+
+---
+
+## Phase 52: REQUIREMENTS.md Backlog 区域重构 (文档维护)
+
+> 日期：2026-03-09
+> 纯文档改动，无代码变更
+
+### 背景
+
+REQUIREMENTS.md 中的手动维护 backlog 区域（Backlog #16、#17）位于文档中间位置，容易被新增的正式需求章节"夹在中间"，导致文档结构混乱。
+
+### 改动
+
+- 移除原有的内联 backlog 区域（Backlog #16 message tool 跨 Session 消息传递、Backlog #17 API 子 Session 命名规范 Skill）
+- 在文件末尾新增结构化的 `## 📋 Backlog（手动维护）` 区域
+- 添加 HTML 注释锚点标记（`⚠️ BACKLOG 区域`、`⚠️ BACKLOG 结束`），明确标识 backlog 边界
+- AI 指令注释：新增正式需求章节时插入到 backlog 区域之前，保持 backlog 始终位于文件最末尾
+- 已完成的 backlog 项已在之前的 Phase 中被提升为正式需求或关闭，当前 backlog 为空
+
+### 验证
+
+- 41 个后端测试全部通过
+- 无代码改动，仅文档结构调整
