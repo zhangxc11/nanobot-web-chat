@@ -566,6 +566,44 @@
 
 /* ── Error message styling ── */
 
+/* ── Bubble Copy Button ── */
+
+.bubbleWithCopy {
+  position: relative;
+}
+
+.bubbleCopyButton {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
+  z-index: 1;
+  padding: 0;
+  line-height: 1;
+}
+
+.bubbleWithCopy:hover .bubbleCopyButton {
+  opacity: 1;
+}
+
+.bubbleCopyButton:hover {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* ── Error message styling ── */
+
 .errorBubble {
   background: rgba(239, 68, 68, 0.08) !important;
   border: 1px solid rgba(239, 68, 68, 0.25);

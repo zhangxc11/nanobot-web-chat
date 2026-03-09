@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import type { Components } from 'react-markdown';
 import { common, createLowlight } from 'lowlight';
@@ -14,11 +15,24 @@ interface MarkdownRendererProps {
   content: string;
 }
 
+/** Recursively extract plain text from React nodes (handles rehype-highlight spans) */
+function extractText(node: React.ReactNode): string {
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (!node) return '';
+  if (Array.isArray(node)) return node.map(extractText).join('');
+  if (typeof node === 'object' && 'props' in node) {
+    const el = node as React.ReactElement<{ children?: React.ReactNode }>;
+    return extractText(el.props.children);
+  }
+  return '';
+}
+
 function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
   const match = /language-(\w+)/.exec(className || '');
   const lang = match ? match[1] : '';
-  const codeStr = String(children).replace(/\n$/, '');
+  const codeStr = extractText(children).replace(/\n$/, '');
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(codeStr).then(() => {
@@ -58,7 +72,7 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
   return (
     <div className={styles.markdown}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={[[rehypeHighlight, { lowlight }]]}
         components={components}
       >

@@ -1,7 +1,32 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import type { Message, ContentBlock } from '@/types';
 import { MarkdownRenderer } from '@/components/Markdown';
 import styles from './MessageList.module.css';
+
+/** Copy button component for message bubbles */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [text]);
+
+  if (!text) return null;
+
+  return (
+    <button
+      className={styles.bubbleCopyButton}
+      onClick={handleCopy}
+      title="复制消息"
+    >
+      {copied ? '✓' : '📋'}
+    </button>
+  );
+}
 
 /** Minimal usage record type (from api.SessionUsage.records) */
 export interface UsageRecord {
@@ -244,7 +269,8 @@ export default function MessageItem({ message }: MessageItemProps) {
 
   return (
     <div className={`${styles.message} ${isUser ? styles.userMessage : styles.assistantMessage}`}>
-      <div className={`${styles.bubble} ${isError ? styles.errorBubble : ''}`}>
+      <div className={`${styles.bubble} ${styles.bubbleWithCopy} ${isError ? styles.errorBubble : ''}`}>
+        <CopyButton text={displayContent} />
         {imageUrls.length > 0 && (
           <div className={styles.messageImages}>
             {imageUrls.map((url, i) => (
@@ -467,9 +493,13 @@ export function AssistantTurnGroup({ messages, usageRecords }: { messages: Messa
   // Find last timestamp in the turn
   const lastTimestamp = [...messages].reverse().find(m => m.timestamp)?.timestamp || '';
 
+  // Determine the text to copy for the entire turn
+  const copyText = finalReplyText || messageToolContent || '';
+
   return (
     <div className={`${styles.message} ${styles.assistantMessage}`}>
-      <div className={`${styles.bubble} ${finalReplyIsError && processItems.length === 0 ? styles.errorBubble : ''}`}>
+      <div className={`${styles.bubble} ${styles.bubbleWithCopy} ${finalReplyIsError && processItems.length === 0 ? styles.errorBubble : ''}`}>
+        <CopyButton text={copyText} />
         <div className={styles.turnContent}>
           {processItems.length > 0 && (
             <ToolProcessCollapsible items={processItems} toolCount={toolCount} usageRecords={matchedUsage} />
