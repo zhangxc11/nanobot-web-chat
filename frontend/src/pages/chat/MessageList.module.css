@@ -72,6 +72,8 @@
   line-height: 1.6;
   font-size: 14px;
   word-break: break-word;
+  /* Prevent content (e.g. code blocks) from overflowing message width */
+  min-width: 0;
 }
 
 .userMessage .bubble {
