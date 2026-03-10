@@ -18,7 +18,7 @@
 | 13.1 | Bug 修复 — Session 重命名发消息后被恢复 | ✅ |
 | 16 | Bug 修复 — 消息 timestamp 不准确 | ✅ |
 | 15 | Bug 修复 — SSE 断开后前端误判任务完成 | ✅ |
-| 14 | 功能模块 v2.0 — 配置/记忆/Skill | 🔜 |
+| 14 | 功能模块 v2.0 — 配置/记忆/Skill | ✅ |
 
 ---
 
@@ -66,7 +66,7 @@
 - ✅ **T5.1** 生产构建：server_v2.py serve 前端 dist/（SPA fallback + 静态资源缓存）
 - ✅ **T5.2** 错误处理 & 边界情况（网络错误提示、重试按钮、空状态优化）
 - ✅ **T5.3** 端到端测试通过（health, sessions, create, static, SPA fallback）
-- 🔜 **T5.4** merge to develop → main，发布
+- ✅ **T5.4** merge to develop → main，发布
 
 ---
 
@@ -363,7 +363,7 @@ SSE 断开 ≠ 任务失败。当 gateway 重启导致 SSE 断开时：
 三个新功能模块，按以下顺序实现：
 
 #### 功能 1：配置模块 (⚙️ 配置)
-- 🔜 **T14.1** 后端 API: `GET /api/config` + `PUT /api/config`（gateway.py）
+- ✅ **T14.1** 后端 API: `GET /api/config` + `PUT /api/config`（gateway.py）
 - **T14.2** 前端 ConfigPage：分区展示 + JSON 编辑器 + 保存
 - **T14.3** 测试 + 提交
 

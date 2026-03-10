@@ -1,5 +1,27 @@
 # nanobot Web Chat — 开发工作日志
 
+<!-- 📖 文档组织说明
+本开发日志采用"主文件 + 归档子文件"结构：
+- **本文件（主文件）**：项目状态总览 + 全量 Phase 索引 + 最近 3 个 Phase 完整正文
+- **devlog/ 子目录**：按 Phase 编号分组的历史开发记录归档
+
+🔍 如何查找历史 Phase：
+1. 在"全量 Phase 索引"表中按编号/标题找到归档文件链接
+2. 最近 3 个 Phase 的完整正文直接在本文件底部
+
+📝 如何记录新 Phase：
+1. 在本文件底部追加新 Phase 正文（保持最近 3 个 Phase 在主文件中）
+2. 将第 4 旧的 Phase 移入最新的归档文件
+3. 更新"全量 Phase 索引"表
+4. 更新"项目状态总览"表
+
+⚠️ 维护规则：
+- 主文件始终只保留最近 3 个 Phase 的完整正文
+- 归档文件中的内容一旦写入不再删减
+- 新 Phase 完成后及时更新状态总览表（🔜 → ✅）
+- 全量索引表必须涵盖所有 Phase，一个不漏
+-->
+
 > 本文件是开发过程的唯一真相源。每次新 session 从这里恢复上下文。
 > 找到 🔜 标记的任务，直接继续执行。
 > 历史 Phase 详情见 `devlog/` 目录下的归档文件。
@@ -23,12 +45,12 @@
 | Phase 11: 自修改事故修复 + 日志 + Session 重命名 | ✅ 已完成 | main |
 | Phase 12: 优雅降级 — Gateway 重启不中断任务 | ✅ 已完成 | main |
 | Phase 13.1: Bug 修复 — Session 重命名后发消息被恢复 | ✅ 已完成 | main |
-| Phase 14: 功能模块 v2.0 — 配置/记忆/Skill | 🔜 进行中 | main |
+| Phase 14: 功能模块 v2.0 — 配置/记忆/Skill | ✅ 已完成 | main |
 | Phase 15: Bug 修复 — SSE 断开后前端误判任务完成 | ✅ 已完成 | main |
 | Phase 16: Bug 修复 — 消息 timestamp 不准确 | ✅ 已完成 | main (nanobot core) |
 | Phase 17: 任务执行体验优化 (Issue #7/#8/#9) | ✅ 已完成 | main |
 | Phase 18: Token 用量统计 (Issue #10) | ✅ 已完成 | nanobot: local 分支, web-chat: main |
-| Phase 19: Token 用量 SQLite 独立存储 | 🔜 进行中 | web-chat: main, nanobot: local |
+| Phase 19: Token 用量 SQLite 独立存储 | ✅ 已完成 | web-chat: main, nanobot: local |
 | Phase 22: Backlog 1-5 修复 | ✅ 已完成 | web-chat: main, nanobot: local |
 | Phase 23: exec PIPE 卡死修复 + Usage 刷新 | ✅ 已完成 | web-chat: main, nanobot: local |
 | Phase 24: SDK 化 + 实时持久化 + 统一 Token | ✅ 已完成 | nanobot: local, web-chat: main |
@@ -43,11 +65,11 @@
 | Phase 33: 斜杠命令系统 (Issue #40) | ✅ 已完成 | web-chat: main |
 | Phase 34: Runtime Context 过滤统一收拢 (Issue #41) | ✅ 已完成 | web-chat: main |
 | Phase 35: Session 列表按来源分组 (Issue #42) | ✅ 已完成 | web-chat: main |
-| Phase 36: ProviderPool — Web Chat Provider 切换 (Issue #43) | 🔜 进行中 | fix/sse-freeze |
+| Phase 36: ProviderPool — Web Chat Provider 切换 (Issue #43) | ✅ 已完成 | fix/sse-freeze |
 | Phase 37: Bug 修复 — SSE 流中断导致前端卡死 | ✅ 已完成 | fix/sse-freeze |
 | Phase 38: LLM 错误响应前端展示 | ✅ 已完成 | main |
 | Phase 39: Message 工具 fallback 显示 + 项目清理 | ✅ 已完成 | main |
-| Phase 40: Provider 配置热加载 + 默认模型配置 (Issue #44/#45/#46) | 🔜 进行中 | main |
+| Phase 40: Provider 配置热加载 + 默认模型配置 (Issue #44/#45/#46) | ✅ 已完成 | main |
 | Phase 41: API Session 前端辨识 (Issue #47 / Backlog #15 → B5) | ✅ 已完成 | main |
 | Phase 42: Session 树形结构 (§三十四 Issue #48) | ✅ 已完成 | main |
 | Phase 43: 三级树状父子关系 (§三十五 Issue #49) | ✅ 已完成 | main |
@@ -92,7 +114,7 @@
 | 13.1 | Bug 修复 — Session 重命名发消息后被恢复 | ✅ | [devlog/phase-02-14.md](devlog/phase-02-14.md) |
 | 16 | Bug 修复 — 消息 timestamp 不准确 | ✅ | [devlog/phase-02-14.md](devlog/phase-02-14.md) |
 | 15 | Bug 修复 — SSE 断开后前端误判任务完成 | ✅ | [devlog/phase-02-14.md](devlog/phase-02-14.md) |
-| 14 | 功能模块 v2.0 — 配置/记忆/Skill | 🔜 | [devlog/phase-02-14.md](devlog/phase-02-14.md) |
+| 14 | 功能模块 v2.0 — 配置/记忆/Skill | ✅ | [devlog/phase-02-14.md](devlog/phase-02-14.md) |
 | 17 | 任务执行体验优化 (Issue #7/#8/#9) | ✅ | [devlog/phase-15-29.md](devlog/phase-15-29.md) |
 | 18 | Token 用量统计 (Issue #10) | ✅ | [devlog/phase-15-29.md](devlog/phase-15-29.md) |
 | 19 | Token 用量 — SQLite 独立存储 (Issue #10 续) | ✅ | [devlog/phase-15-29.md](devlog/phase-15-29.md) |
@@ -118,7 +140,7 @@
 | 34 | Runtime Context 过滤统一收拢 (Issue #41) | ✅ | [devlog/phase-30-43.md](devlog/phase-30-43.md) |
 | 31 | Gateway 改名 Webserver + URL 编码 Bug 修复 (Issue #36/#37) | ✅ | [devlog/phase-30-43.md](devlog/phase-30-43.md) |
 | 35 | Session 列表按来源分组 (Issue #42) | ✅ | [devlog/phase-30-43.md](devlog/phase-30-43.md) |
-| 36 | ProviderPool — Web Chat Provider 切换 (Issue #43) | 🔜 | [devlog/phase-30-43.md](devlog/phase-30-43.md) |
+| 36 | ProviderPool — Web Chat Provider 切换 (Issue #43) | ✅ | [devlog/phase-30-43.md](devlog/phase-30-43.md) |
 | 37 | Bug 修复 — SSE 流中断导致前端卡死 | ✅ | [devlog/phase-30-43.md](devlog/phase-30-43.md) |
 | 38 | LLM 错误响应显示 | ✅ | [devlog/phase-30-43.md](devlog/phase-30-43.md) |
 | 39 | Message 工具 fallback 显示 + 项目清理 | ✅ | [devlog/phase-30-43.md](devlog/phase-30-43.md) |
