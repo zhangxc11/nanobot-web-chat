@@ -163,6 +163,51 @@ class WorkerSessionMessenger:
         return True
 
 
+# ── §40: SubagentManager singleton ──
+# Shared across all AgentLoop instances within this worker process.
+# Ensures subagent metadata (_task_meta, _session_tasks) persists across
+# HTTP requests, enabling cross-turn follow_up/status/stop/list.
+
+_subagent_manager = None   # SubagentManager instance
+_subagent_manager_lock = threading.Lock()
+
+
+def _get_subagent_manager():
+    """Get or create the module-level SubagentManager singleton."""
+    global _subagent_manager
+    if _subagent_manager is not None:
+        return _subagent_manager
+    with _subagent_manager_lock:
+        if _subagent_manager is not None:
+            return _subagent_manager
+
+        from nanobot.config.loader import load_config
+        from nanobot.agent.subagent import SubagentManager
+        from nanobot.session.manager import SessionManager
+        from nanobot.bus.queue import MessageBus
+        from nanobot.usage.recorder import UsageRecorder
+
+        pool = _get_pool()
+        config = load_config()
+
+        _subagent_manager = SubagentManager(
+            provider=pool,
+            workspace=config.workspace_path,
+            bus=MessageBus(),
+            model=pool.active_model,
+            temperature=config.agents.defaults.temperature,
+            max_tokens=config.agents.defaults.max_tokens,
+            exec_config=config.tools.exec,
+            restrict_to_workspace=config.tools.restrict_to_workspace,
+            usage_recorder=UsageRecorder(),  # §40 fix: subagent usage needs its own recorder
+            session_manager=SessionManager(config.workspace_path),
+            task_keeper=_keep_subagent_task,
+            session_messenger=WorkerSessionMessenger(),
+        )
+        logger.info("SubagentManager singleton created")
+        return _subagent_manager
+
+
 # ── AgentRunner factory — one runner per task for concurrency safety ──
 # Each concurrent task gets its own AgentRunner with independent tool context,
 # so that _set_tool_context() in one task doesn't clobber another.
@@ -225,6 +270,7 @@ def _create_runner():
         audit_logger=audit_logger,
         subagent_task_keeper=_keep_subagent_task,
         session_messenger=messenger,
+        subagent_manager=_get_subagent_manager(),  # §40: shared singleton
     )
 
     runner = AgentRunner(agent_loop)

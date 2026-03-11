@@ -84,6 +84,8 @@
 | Phase 51: Subagent 消息 Role 适配 (§四十二) | ✅ 已完成 | main |
 | Phase 52: REQUIREMENTS.md Backlog 区域重构 | ✅ 已完成 | main |
 | Phase 53: 日志路径统一迁移 — /tmp → ~/.nanobot/logs/ | ✅ 已完成 | main |
+| Phase 54: 前端 Markdown 渲染修复与消息复制 (§四十三) | ✅ 已完成 | main |
+| Phase 55: SubagentManager 单例化 (nanobot §40) | ✅ 已完成 | main |
 
 ---
 
@@ -333,3 +335,35 @@ nanobot 的 gateway、webserver、worker 日志散落在 `/tmp/` 目录下：
 
 ### 结果
 ✅ Phase 54 全部完成（7 个 Issue 全部修复）
+
+---
+
+## Phase 55: SubagentManager 单例化 (nanobot §40) ✅
+
+**日期**: 2026-03-11
+**需求**: nanobot 核心 §40（`requirements/s40-s49.md`）
+
+### 背景
+
+Web worker 模式下，每次 HTTP 请求创建新的 `AgentLoop → SubagentManager`，turn 结束后被 GC。导致跨 turn 的 `follow_up`/`status`/`stop`/`list` 全部失效。
+
+### 改动
+
+- `worker.py`: 新增 `_get_subagent_manager()` 模块级单例工厂（double-checked locking）
+- `worker.py`: `_create_runner()` 透传 `subagent_manager=_get_subagent_manager()` 给 AgentLoop
+
+### Hotfix: subagent usage_recorder 丢失 (2026-03-11)
+
+**根因**: `_get_subagent_manager()` 初始版本未传 `usage_recorder`，singleton 的 `usage_recorder=None`，导致所有 subagent 的 usage 数据不再记录到 SQLite。
+
+**修复**: 传入 `usage_recorder=UsageRecorder()`。
+
+**配套（nanobot 核心）**:
+- `loop.py`: 外部传入 `subagent_manager` 且 `usage_recorder=None` 时打 warning 日志
+- `test_spawn_singleton.py`: 新增 4 项测试（25→29），覆盖 usage_recorder 在 singleton/默认两种模式下的传递
+
+### 影响文件
+
+| 文件 | 改动 |
+|------|------|
+| `worker.py` | `_get_subagent_manager()` 单例 + `_create_runner()` 透传 |
