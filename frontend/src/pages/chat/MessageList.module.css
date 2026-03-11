@@ -5,6 +5,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .messageContent {
@@ -702,4 +703,49 @@
 .progressSystemInject {
   color: rgba(99, 102, 241, 0.9);
   font-style: italic;
+}
+
+/* ── Scroll to Bottom Button ── */
+
+.scrollToBottom {
+  position: sticky;
+  bottom: 16px;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  z-index: 10;
+  margin-top: -44px;
+}
+
+.scrollToBottomVisible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.scrollToBottom:hover {
+  opacity: 0.9;
+}
+
+.scrollToBottomArrow {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.scrollToBottomText {
+  line-height: 1;
 }

@@ -81,6 +81,8 @@
 | §四十八 | Subagent 可见性 — 后端 API | v5.7 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 | §四十九 | Subagent 可见性 — 前端运行标识 | v5.7 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 | §五十 | Bug 修复 — Session 列表轮询闪烁 | v5.7.1 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §五十一 | 前端隐藏标记改为闭合标签 + 仅 user 消息生效 | v5.8 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §五十二 | Turn 结束后「滚动到底部」提示按钮 | v5.8 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 
 ---
 

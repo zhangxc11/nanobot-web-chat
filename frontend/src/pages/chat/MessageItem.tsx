@@ -59,26 +59,48 @@ function getErrorText(content: string | ContentBlock[]): string {
     : text;
 }
 
-/** Extract text content from a message (handles both string and multimodal array) */
-function getTextContent(content: string | ContentBlock[]): string {
-  if (typeof content === 'string') return stripSystemMarker(content);
+/** Extract text content from a message (handles both string and multimodal array).
+ *  When role is 'user', system markers are stripped. Other roles are returned as-is.
+ */
+function getTextContent(content: string | ContentBlock[], role?: string): string {
+  const shouldStrip = role === 'user';
+  if (typeof content === 'string') return shouldStrip ? stripSystemMarker(content) : content;
   if (Array.isArray(content)) {
     return content
       .filter(b => b.type === 'text' && b.text)
-      .map(b => stripSystemMarker(b.text!))
+      .map(b => shouldStrip ? stripSystemMarker(b.text!) : b.text!)
       .join('\n');
   }
   return '';
 }
 
-/** Nanobot system marker — content after this marker is hidden from display */
-const SYSTEM_MARKER = '<!-- nanobot:system -->';
+/** Nanobot system marker — open/close tags for content hidden from display */
+const SYSTEM_MARKER_OPEN = '<!-- nanobot:system -->';
+const SYSTEM_MARKER_CLOSE = '<!-- /nanobot:system -->';
 
-/** Strip content after the nanobot system marker (if present) */
+/** Strip content between nanobot system marker tags (if present).
+ *  - Open + Close → remove tagged section, keep surrounding text
+ *  - Open only (no close) → fallback: truncate from open tag onward (backward compat)
+ *  - No open → return as-is
+ */
 function stripSystemMarker(text: string): string {
-  const idx = text.indexOf(SYSTEM_MARKER);
-  if (idx === -1) return text;
-  return text.substring(0, idx).trimEnd();
+  const openIdx = text.indexOf(SYSTEM_MARKER_OPEN);
+  if (openIdx === -1) return text;
+
+  const visiblePart = text.substring(0, openIdx).trim();
+  const closeIdx = text.indexOf(SYSTEM_MARKER_CLOSE, openIdx);
+
+  if (closeIdx !== -1) {
+    // Has close tag → remove tagged section
+    const afterClose = text.substring(closeIdx + SYSTEM_MARKER_CLOSE.length).trim();
+    if (afterClose) {
+      return visiblePart ? `${visiblePart}\n\n${afterClose}` : afterClose;
+    }
+    return visiblePart;
+  }
+
+  // No close tag → do NOT hide: show full content as-is (legacy messages should remain visible)
+  return text;
 }
 
 /** Extract image URLs from multimodal content */
@@ -272,7 +294,7 @@ export default function MessageItem({ message }: MessageItemProps) {
   }
 
   const isUser = role === 'user';
-  const textContent = getTextContent(content);
+  const textContent = getTextContent(content, role);
   const imageUrls = isUser ? getImageUrls(content) : [];
   const isError = !isUser && isErrorMessage(content);
   const displayContent = isError ? getErrorText(content) : textContent;

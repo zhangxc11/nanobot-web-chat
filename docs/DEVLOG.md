@@ -87,6 +87,8 @@
 | Phase 54: 前端 Markdown 渲染修复与消息复制 (§四十三) | ✅ 已完成 | main |
 | Phase 55: SubagentManager 单例化 (nanobot §40) | ✅ 已完成 | main |
 | Phase 56: Web-chat 基础改动 (§四十四~§四十七) | ✅ 已完成 | main |
+| Phase 57: Subagent 可见性 — 运行标识与进度 (§四十八~§五十) | ✅ 已完成 | main |
+| Phase 58: 闭合标签 + 滚动按钮 (§五十一~§五十二) | ✅ 已完成 | main |
 
 ---
 
@@ -499,3 +501,26 @@ Web worker 模式下，每次 HTTP 请求创建新的 `AgentLoop → SubagentMan
 - **前端修复必须包含 `npm run build`**：源码修改不等于生效，dist 中的 bundle 才是浏览器加载的文件
 - **轮询 hook 必须做引用稳定性检查**：React state 更新基于引用比较，每次创建新对象即使内容相同也会触发重渲染
 - **loading 状态应区分首次加载与后台刷新**：首次加载可以显示 skeleton/loading，后台静默刷新不应影响已渲染的 UI
+
+---
+
+## Phase 58: 闭合标签 + 滚动按钮 (§五十一~§五十二) ✅
+
+**日期**: 2026-03-11
+**需求**: §五十一（前端隐藏标记改为闭合标签 + 仅 user 消息生效）、§五十二（Turn 结束后「滚动到底部」提示按钮）
+
+### 任务清单
+
+- [x] §五十一：`stripSystemMarker` 改为闭合标签对算法，`getTextContent` 增加 role 过滤
+- [x] §五十二：MessageList 添加 ScrollToBottomButton，turn 结束时提示
+
+### 改动文件汇总
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/pages/chat/MessageItem.tsx` | 闭合标签常量 + 新 stripSystemMarker 算法 + getTextContent role 参数 |
+| `frontend/src/pages/chat/MessageList.tsx` | ScrollToBottomButton 组件 + turn 结束检测 + 滚动位置监听 |
+| `frontend/src/pages/chat/MessageList.module.css` | 滚动按钮样式 + 出现/消失动画 |
+| `docs/REQUIREMENTS.md` | 索引表新增 §五十一、§五十二 |
+| `docs/requirements/s44-s56.md` | §五十一、§五十二 正文 |
+| `docs/DEVLOG.md` | Phase 58 记录 |

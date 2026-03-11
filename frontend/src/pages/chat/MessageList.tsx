@@ -7,6 +7,20 @@ import * as api from '@/services/api';
 import MessageItem, { groupMessages, AssistantTurnGroup, SystemInjectCard } from './MessageItem';
 import styles from './MessageList.module.css';
 
+/** Scroll-to-bottom floating button — appears when turn ends and user is not at bottom */
+function ScrollToBottomButton({ visible, onClick }: { visible: boolean; onClick: () => void }) {
+  return (
+    <button
+      className={`${styles.scrollToBottom} ${visible ? styles.scrollToBottomVisible : ''}`}
+      onClick={onClick}
+      aria-label="滚动到底部"
+    >
+      <span className={styles.scrollToBottomArrow}>↓</span>
+      <span className={styles.scrollToBottomText}>新消息</span>
+    </button>
+  );
+}
+
 /** A single progress step — supports expand/collapse for tool results */
 function ProgressStepItem({ step }: { step: ProgressStep }) {
   const [expanded, setExpanded] = useState(false);
@@ -132,6 +146,10 @@ export default function MessageList() {
   const topSentinelRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [sessionUsage, setSessionUsage] = useState<SessionUsage | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+
+  // Track previous sending state to detect turn end (sending: true → false)
+  const prevSendingRef = useRef(false);
 
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const loadMoreMessages = useMessageStore((s) => s.loadMoreMessages);
@@ -248,6 +266,45 @@ export default function MessageList() {
     }
   }, [isCurrentSessionSending, progressSteps, isNearBottom]);
 
+  // Detect turn end (sending: true → false) — show scroll-to-bottom button if not near bottom
+  useEffect(() => {
+    const wasSending = prevSendingRef.current;
+    prevSendingRef.current = isCurrentSessionSending;
+
+    if (wasSending && !isCurrentSessionSending) {
+      // Turn just ended — check if user is not near bottom
+      if (!isNearBottom()) {
+        setShowScrollToBottom(true);
+      }
+    }
+  }, [isCurrentSessionSending, isNearBottom]);
+
+  // Hide scroll-to-bottom button when user scrolls to bottom manually
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const onScroll = () => {
+      if (showScrollToBottom && isNearBottom()) {
+        setShowScrollToBottom(false);
+      }
+    };
+
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, [showScrollToBottom, isNearBottom]);
+
+  // Hide scroll-to-bottom button when session changes
+  useEffect(() => {
+    setShowScrollToBottom(false);
+  }, [activeSessionId]);
+
+  /** Handle scroll-to-bottom button click */
+  const handleScrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowScrollToBottom(false);
+  }, []);
+
   // IntersectionObserver for infinite scroll (load older messages)
   const handleLoadMore = useCallback(() => {
     if (!activeSessionId || loading || !hasMore) return;
@@ -340,6 +397,7 @@ export default function MessageList() {
         )}
         <div ref={bottomRef} />
       </div>
+      <ScrollToBottomButton visible={showScrollToBottom} onClick={handleScrollToBottom} />
     </div>
   );
 }
