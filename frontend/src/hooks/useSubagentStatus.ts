@@ -9,6 +9,23 @@ import type { SubagentInfo } from '@/services/api';
 const POLL_INTERVAL = 5_000; // 5 seconds
 
 /**
+ * Shallow-compare two Maps of SubagentInfo arrays by serializing to JSON.
+ * Returns true if they are equal.
+ */
+function mapsEqual(
+  a: Map<string, SubagentInfo[]>,
+  b: Map<string, SubagentInfo[]>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, aVal] of a) {
+    const bVal = b.get(key);
+    if (!bVal) return false;
+    if (JSON.stringify(aVal) !== JSON.stringify(bVal)) return false;
+  }
+  return true;
+}
+
+/**
  * Given a set of running session keys and a set of parent session keys to watch,
  * returns a map of parentSessionKey → SubagentInfo[].
  * Only polls parents that have at least one running child.
@@ -19,17 +36,20 @@ export function useSubagentStatus(
 ): Map<string, SubagentInfo[]> {
   const [statusMap, setStatusMap] = useState<Map<string, SubagentInfo[]>>(new Map());
   const activeParentsRef = useRef<string[]>([]);
+  const prevMapRef = useRef<Map<string, SubagentInfo[]>>(new Map());
 
   // Determine which parents to poll: those that have at least one running child
-  // We check if any key in runningKeys looks like a subagent of the parent
   const activeParents = parentSessionKeys.filter(() => {
-    // Poll all provided parents when there are running sessions
     return runningKeys.size > 0;
   });
 
   const poll = useCallback(async () => {
     if (activeParents.length === 0) {
-      setStatusMap(new Map());
+      if (prevMapRef.current.size > 0) {
+        const empty = new Map<string, SubagentInfo[]>();
+        prevMapRef.current = empty;
+        setStatusMap(empty);
+      }
       return;
     }
 
@@ -46,13 +66,22 @@ export function useSubagentStatus(
     });
 
     await Promise.all(promises);
-    setStatusMap(newMap);
+
+    // Only update state when content actually changed (avoid unnecessary re-renders)
+    if (!mapsEqual(newMap, prevMapRef.current)) {
+      prevMapRef.current = newMap;
+      setStatusMap(newMap);
+    }
   }, [activeParents.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     activeParentsRef.current = activeParents;
     if (activeParents.length === 0) {
-      setStatusMap(new Map());
+      if (prevMapRef.current.size > 0) {
+        const empty = new Map<string, SubagentInfo[]>();
+        prevMapRef.current = empty;
+        setStatusMap(empty);
+      }
       return;
     }
 

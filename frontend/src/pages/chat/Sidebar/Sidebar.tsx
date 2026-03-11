@@ -8,7 +8,7 @@ import styles from './Sidebar.module.css';
 
 export default function Sidebar() {
   const { toggleSidebar } = useUIStore();
-  const { fetchSessions, createSession, setActiveSession, hideDone, setHideDone, loading } = useSessionStore();
+  const { fetchSessions, createSession, setActiveSession, hideDone, setHideDone } = useSessionStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<api.SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -118,10 +118,6 @@ export default function Sidebar() {
                 </div>
               ))
             )}
-          </div>
-        ) : loading ? (
-          <div className={styles.emptyList}>
-            <p>加载中...</p>
           </div>
         ) : (
           <SessionList />

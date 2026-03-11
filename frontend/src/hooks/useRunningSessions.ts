@@ -18,9 +18,8 @@ export function useRunningSessions(): Set<string> {
     try {
       const data = await fetchRunningSessions();
       const newKeys = new Set(data.running || []);
-      setRunningKeys(newKeys);
 
-      // Check if there are new keys compared to previous poll
+      // Compare with previous poll to detect changes
       const prev = prevKeysRef.current;
       let hasNew = false;
       for (const k of newKeys) {
@@ -29,7 +28,6 @@ export function useRunningSessions(): Set<string> {
           break;
         }
       }
-      // Also check if sessions finished (were running, now not)
       let hasFinished = false;
       for (const k of prev) {
         if (!newKeys.has(k)) {
@@ -38,7 +36,11 @@ export function useRunningSessions(): Set<string> {
         }
       }
 
-      if (hasNew || hasFinished) {
+      const changed = hasNew || hasFinished;
+
+      // Only update state when the set actually changed (avoid unnecessary re-renders)
+      if (changed) {
+        setRunningKeys(newKeys);
         // Refresh session list to pick up new sessions or updated state
         fetchSessions();
       }

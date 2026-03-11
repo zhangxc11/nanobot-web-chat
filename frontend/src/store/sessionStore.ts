@@ -34,7 +34,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   error: null,
 
   fetchSessions: async () => {
-    set({ loading: true, error: null });
+    // Only show loading spinner on initial load (no sessions yet)
+    const hasData = get().sessions.length > 0;
+    set({ loading: !hasData, error: null });
     try {
       const [sessionsData, parentMap, tagsMap] = await Promise.all([
         api.fetchSessions(),
