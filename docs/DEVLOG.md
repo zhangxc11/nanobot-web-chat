@@ -89,6 +89,7 @@
 | Phase 56: Web-chat 基础改动 (§四十四~§四十七) | ✅ 已完成 | main |
 | Phase 57: Subagent 可见性 — 运行标识与进度 (§四十八~§五十) | ✅ 已完成 | main |
 | Phase 58: 闭合标签 + 滚动按钮 (§五十一~§五十二) | ✅ 已完成 | main |
+| Phase 58 Hotfix: 标签泄露 + 滚动修复 | ✅ 已完成 | main |
 
 ---
 
@@ -524,3 +525,36 @@ Web worker 模式下，每次 HTTP 请求创建新的 `AgentLoop → SubagentMan
 | `docs/REQUIREMENTS.md` | 索引表新增 §五十一、§五十二 |
 | `docs/requirements/s44-s56.md` | §五十一、§五十二 正文 |
 | `docs/DEVLOG.md` | Phase 58 记录 |
+
+---
+
+## Phase 58 Hotfix: SystemInjectCard 标签泄露 + Turn 结束自动滚动 ✅
+
+**日期**: 2026-03-12
+**Commits**: `67a80d9` (标签泄露) + `0045a71` (滚动修复)
+
+### Bug 1: SystemInjectCard 中 `<!-- nanobot:system -->` 内容未隐藏
+
+**现象**: 展开 subagent 结果卡片时，`<!-- nanobot:system -->` 标签及其内部的系统引导文本直接暴露给用户。
+
+**根因**: `SystemInjectCard` 组件调用 `getTextContent(message.content)` 时没有传 `role` 参数，导致 `shouldStrip = undefined === 'user'` → `false`，`stripSystemMarker` 未执行。
+
+**修复**: 改为 `getTextContent(message.content, 'user')`，确保 system marker 被 strip。
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/pages/chat/MessageItem.tsx` | `SystemInjectCard` 中 `getTextContent` 传入 `'user'` role |
+
+### Bug 2: Turn 结束后直接滚动到底部，不显示"新消息"按钮
+
+**现象**: Turn 结束后页面直接跳到底部，§五十二 的 ScrollToBottomButton 从未出现。
+
+**根因**: Turn 进行中 progress indicator 持续 auto-scroll 把用户拉到底部。Turn 结束时 `_reloadMessages` 同时更新 `messages` + `sending=false`（同一个 `set()` 调用）。React 批量处理后，messages useEffect **先于** turn-end useEffect 执行：
+1. messages useEffect: `isNearBottom()=true`（刚被 progress scroll 到底）→ 直接 `scrollIntoView`
+2. turn-end useEffect: `!isNearBottom()=false`（刚被第 1 步 scroll 到底）→ 不显示按钮
+
+**修复**: 在 messages auto-scroll useEffect 中新增 turn-end 检测 `prevSendingRef.current && !isCurrentSessionSending`。利用 React useEffect 声明顺序保证：messages useEffect 先执行时 `prevSendingRef` 尚未被 turn-end useEffect 更新，仍为 `true`。当检测到 turn-end 时跳过 auto-scroll，交由 turn-end useEffect 通过 `requestAnimationFrame` 决定是否显示按钮。
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/pages/chat/MessageList.tsx` | auto-scroll useEffect 增加 `isTurnEnd` 判断跳过滚动 |
