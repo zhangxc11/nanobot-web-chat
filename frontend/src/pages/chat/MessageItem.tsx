@@ -621,7 +621,7 @@ function formatSubagentSource(source: string): string {
 
 export function SystemInjectCard({ message }: { message: Message }) {
   const [expanded, setExpanded] = useState(false);
-  const content = getTextContent(message.content);
+  const content = getTextContent(message.content, 'user');
   const { source, body } = parseSystemInject(content);
   const displaySource = formatSubagentSource(source);
 
