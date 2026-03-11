@@ -61,14 +61,24 @@ function getErrorText(content: string | ContentBlock[]): string {
 
 /** Extract text content from a message (handles both string and multimodal array) */
 function getTextContent(content: string | ContentBlock[]): string {
-  if (typeof content === 'string') return content;
+  if (typeof content === 'string') return stripSystemMarker(content);
   if (Array.isArray(content)) {
     return content
       .filter(b => b.type === 'text' && b.text)
-      .map(b => b.text!)
+      .map(b => stripSystemMarker(b.text!))
       .join('\n');
   }
   return '';
+}
+
+/** Nanobot system marker — content after this marker is hidden from display */
+const SYSTEM_MARKER = '<!-- nanobot:system -->';
+
+/** Strip content after the nanobot system marker (if present) */
+function stripSystemMarker(text: string): string {
+  const idx = text.indexOf(SYSTEM_MARKER);
+  if (idx === -1) return text;
+  return text.substring(0, idx).trimEnd();
 }
 
 /** Extract image URLs from multimodal content */

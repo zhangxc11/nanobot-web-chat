@@ -22,6 +22,7 @@ const HELP_TEXT = `🐈 nanobot commands:
 /flush    — 归档当前记忆并清空对话
 /stop     — 停止正在执行的任务
 /provider — 查看/切换 LLM provider
+/session  — 查看当前 session 信息
 /help     — 显示此帮助信息`;
 
 /** Create a local system message (not persisted to JSONL) */
@@ -32,6 +33,13 @@ function _makeSystemMsg(content: string): Message {
     content,
     timestamp: new Date().toISOString(),
   };
+}
+
+/** Format token count to human-readable string */
+function _formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
 interface MessageStore {
@@ -239,6 +247,84 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         }
 
         default: {
+          // Check for /session command
+          if (cmd === '/session') {
+            if (task.sending) {
+              set((s) => ({
+                messages: [...s.messages, _makeSystemMsg('⚠️ 任务执行中，请稍后查看 session 信息。')],
+              }));
+              return;
+            }
+
+            try {
+              // Convert session ID to session key format for API
+              const key = (() => {
+                const idx = sessionId.indexOf('_');
+                if (idx > 0) return sessionId.substring(0, idx) + ':' + sessionId.substring(idx + 1);
+                return sessionId;
+              })();
+
+              // Fetch usage data
+              let usageLine = 'N/A';
+              try {
+                const usage = await api.fetchSessionUsage(key);
+                usageLine = (
+                  `${usage.prompt_tokens.toLocaleString()} prompt + ` +
+                  `${usage.completion_tokens.toLocaleString()} completion = ` +
+                  `**${usage.total_tokens.toLocaleString()}** total ` +
+                  `(${usage.llm_calls} 次调用)`
+                );
+                // Append cache info if available
+                const cacheRead = usage.cache_read_input_tokens ?? 0;
+                const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+                if (cacheRead || cacheCreation) {
+                  const cacheParts: string[] = [];
+                  if (cacheRead) cacheParts.push(`缓存命中: ${_formatTokens(cacheRead)}`);
+                  if (cacheCreation) cacheParts.push(`缓存写入: ${_formatTokens(cacheCreation)}`);
+                  const uncached = usage.prompt_tokens - cacheRead - cacheCreation;
+                  if (uncached > 0) cacheParts.push(`未缓存: ${_formatTokens(uncached)}`);
+                  usageLine += `\n**缓存**: ${cacheParts.join(' · ')}`;
+                }
+              } catch {
+                usageLine = '查询失败';
+              }
+
+              // Fetch provider info
+              let providerLine = 'N/A';
+              try {
+                const { useProviderStore } = await import('@/store/providerStore');
+                await useProviderStore.getState().fetchProvider();
+                const { active } = useProviderStore.getState();
+                if (active) {
+                  providerLine = `${active.name} / \`${active.model}\``;
+                }
+              } catch {
+                providerLine = '查询失败';
+              }
+
+              const statusText = task.sending ? '🔄 执行中（正在处理任务）' : '💤 空闲（等待输入）';
+
+              const lines = [
+                `📋 **Session 信息**`,
+                ``,
+                `**Session Key**: \`${key}\``,
+                `**状态**: ${statusText}`,
+                `**Provider**: ${providerLine}`,
+                `**Token 用量**: ${usageLine}`,
+              ];
+
+              set((s) => ({
+                messages: [...s.messages, _makeSystemMsg(lines.join('\n'))],
+              }));
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              set((s) => ({
+                messages: [...s.messages, _makeSystemMsg(`❌ ${msg}`)],
+              }));
+            }
+            return;
+          }
+
           // Check for /provider (may have arguments, so can't use exact match)
           if (cmd === '/provider' || cmd.startsWith('/provider')) {
             // /provider command: query or switch provider
@@ -324,6 +410,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       content,
       timestamp: new Date().toISOString(),
     };
+    // Signal that user initiated this send (for scroll behavior)
+    window.dispatchEvent(new CustomEvent('user-message-sent'));
     set((s) => ({
       messages: [...s.messages, userMsg],
       error: null,

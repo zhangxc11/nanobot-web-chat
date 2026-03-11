@@ -141,6 +141,24 @@ export default function MessageList() {
   // Track whether the current load is an initial load (vs loadMore)
   const isInitialLoadRef = useRef(false);
 
+  // Track whether user just sent a message (should always scroll to bottom)
+  const userSentRef = useRef(false);
+
+  /** Check if scroll position is near the bottom (within threshold) */
+  const isNearBottom = useCallback((): boolean => {
+    const container = scrollContainerRef.current;
+    if (!container) return true;
+    const threshold = 150;
+    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+  }, []);
+
+  // Listen for user-sent events (dispatched by messageStore.sendMessage)
+  useEffect(() => {
+    const onUserSent = () => { userSentRef.current = true; };
+    window.addEventListener('user-message-sent', onUserSent);
+    return () => window.removeEventListener('user-message-sent', onUserSent);
+  }, []);
+
   // Load messages when active session changes
   useEffect(() => {
     if (activeSessionId) {
@@ -205,22 +223,30 @@ export default function MessageList() {
       return;
     }
 
-    // Subsequent updates: only auto-scroll if a small number of messages were appended
+    // Subsequent updates: check context
     if (messages.length > prevMsgCountRef.current) {
-      const diff = messages.length - prevMsgCountRef.current;
-      if (diff <= 3) {
+      if (userSentRef.current) {
+        // User just sent a message — always scroll to bottom
+        userSentRef.current = false;
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      } else if (isNearBottom()) {
+        // SSE/streaming update and user is near bottom — follow along
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
       }
+      // If user is scrolled up browsing history — do nothing
     }
     prevMsgCountRef.current = messages.length;
-  }, [messages]);
+  }, [messages, isNearBottom]);
 
   // Auto-scroll when new progress steps arrive or sending state changes
   useEffect(() => {
     if (isCurrentSessionSending) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      if (userSentRef.current || isNearBottom()) {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        userSentRef.current = false;
+      }
     }
-  }, [isCurrentSessionSending, progressSteps]);
+  }, [isCurrentSessionSending, progressSteps, isNearBottom]);
 
   // IntersectionObserver for infinite scroll (load older messages)
   const handleLoadMore = useCallback(() => {

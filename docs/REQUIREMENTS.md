@@ -74,6 +74,10 @@
 | §四十一 | System Inject 消息展示 | v5.3 | ✅ | [requirements/s31-s43.md](requirements/s31-s43.md) |
 | §四十二 | Subagent 消息 Role 适配 — 内容前缀识别 | v5.4 | ✅ | [requirements/s31-s43.md](requirements/s31-s43.md) |
 | §四十三 | 前端 Markdown 渲染修复与消息复制 | v5.5 | ✅ | [requirements/s31-s43.md](requirements/s31-s43.md) |
+| §四十四 | subagent 返回内容前端隐藏 system prompt | v5.6 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §四十五 | SSE 刷新保持用户浏览位置 | v5.6 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §四十六 | /session 命令补充 cache 信息 + web 端支持 | v5.6 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §四十七 | web-subsession 父子关系注册 | v5.6 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 
 ---
 

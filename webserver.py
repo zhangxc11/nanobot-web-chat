@@ -267,6 +267,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_inject_message(route_params['id'])
             return
 
+        if path == '/api/sessions/parents':
+            self._handle_post_session_parent()
+            return
+
         if path == '/api/provider/reload':
             self._handle_proxy_provider_reload()
             return
@@ -430,6 +434,45 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'ok': True})
         except Exception as e:
             logger.error(f"Failed to write session parents: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    # File lock for concurrent session_parents.json writes
+    _parents_file_lock = threading.Lock()
+
+    def _handle_post_session_parent(self):
+        """POST /api/sessions/parents — append a single parent mapping.
+
+        Body: {"child": "child_session_id", "parent": "parent_session_id"}
+        Thread-safe: uses file lock to prevent concurrent write corruption.
+        """
+        try:
+            body = self._read_body()
+            if not body:
+                self._send_json({'error': 'Empty body'}, 400)
+                return
+            child = body.get('child')
+            parent = body.get('parent')
+            if not child or not parent or not isinstance(child, str) or not isinstance(parent, str):
+                self._send_json({'error': 'Body must have "child" and "parent" string fields'}, 400)
+                return
+
+            with self._parents_file_lock:
+                # Read existing
+                data = {}
+                if os.path.isfile(SESSION_PARENTS_FILE):
+                    with open(SESSION_PARENTS_FILE, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                # Append
+                data[child] = parent
+                # Write back
+                os.makedirs(os.path.dirname(SESSION_PARENTS_FILE), exist_ok=True)
+                with open(SESSION_PARENTS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"Registered parent: {child} → {parent}")
+            self._send_json({'ok': True, 'child': child, 'parent': parent})
+        except Exception as e:
+            logger.error(f"Failed to post session parent: {e}")
             self._send_json({'error': str(e)}, 500)
 
     # ── Session names (display names) ──

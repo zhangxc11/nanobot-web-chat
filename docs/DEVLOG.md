@@ -86,6 +86,7 @@
 | Phase 53: 日志路径统一迁移 — /tmp → ~/.nanobot/logs/ | ✅ 已完成 | main |
 | Phase 54: 前端 Markdown 渲染修复与消息复制 (§四十三) | ✅ 已完成 | main |
 | Phase 55: SubagentManager 单例化 (nanobot §40) | ✅ 已完成 | main |
+| Phase 56: Web-chat 基础改动 (§四十四~§四十七) | ✅ 已完成 | main |
 
 ---
 
@@ -160,6 +161,8 @@
 | 52 | REQUIREMENTS.md Backlog 区域重构 (文档维护) | ✅ | [devlog/phase-44-54.md](devlog/phase-44-54.md) + (本文件) |
 | 53 | 日志路径统一迁移 — /tmp → ~/.nanobot/logs/ | ✅ | [devlog/phase-44-54.md](devlog/phase-44-54.md) + (本文件) |
 | 54 | 前端 Markdown 渲染修复与消息复制 (v5.5) | ✅ | [devlog/phase-44-54.md](devlog/phase-44-54.md) + (本文件) |
+| 55 | SubagentManager 单例化 (nanobot §40) | ✅ | (本文件) |
+| 56 | Web-chat 基础改动 (§四十四~§四十七) | ✅ | (本文件) |
 
 ---
 
@@ -367,3 +370,55 @@ Web worker 模式下，每次 HTTP 请求创建新的 `AgentLoop → SubagentMan
 | 文件 | 改动 |
 |------|------|
 | `worker.py` | `_get_subagent_manager()` 单例 + `_create_runner()` 透传 |
+
+---
+
+## Phase 56: Web-chat 基础改动 (§四十四~§四十七) ✅
+
+**日期**: 2026-03-11
+**需求**: §四十四~§四十七
+
+### 任务清单
+
+- [x] §四十四 subagent 返回内容前端隐藏 system prompt
+- [x] §四十五 SSE 刷新保持用户浏览位置
+- [x] §四十六 /session 命令补充 cache 信息 + web 端支持
+- [x] §四十七 web-subsession 父子关系注册
+
+### §四十四 实现
+
+- `MessageItem.tsx`: 新增 `stripSystemMarker()` 函数，检测 `<!-- nanobot:system -->` 标记并截断
+- 应用于 `getTextContent()`（影响显示和复制）、`AssistantTurnGroup` 的 finalReplyText 和 copyText
+
+### §四十五 实现
+
+- `MessageList.tsx`: 新增 `isNearBottom()` 辅助函数和 `userSentRef` ref
+- 用户发送消息时设置 `userSentRef.current = true`，滚动时总是滚到底部
+- SSE 推送/progress 更新时，仅在用户处于底部附近（150px 阈值）时自动跟随
+
+### §四十六 实现
+
+- `nanobot/usage/recorder.py`: `get_session_usage()` 增加 cache_creation_input_tokens 和 cache_read_input_tokens 字段
+- `nanobot/agent/loop.py`: `/session` 命令 token_line 追加 cache 行
+- `messageStore.ts`: 新增 `/session` slash 命令，通过 API 获取 session usage 并显示
+
+### §四十七 实现
+
+- `webserver.py`: `do_POST` 新增 `POST /api/sessions/parents` 路由 + `_handle_post_session_parent()` 方法（文件锁）
+- `create_subsession.sh`: 新增 `--parent` 参数，创建 session 后 curl POST 注册
+- `skills/web-subsession/SKILL.md`: 文档更新 --parent 参数说明
+- `skills/batch-orchestrator/SKILL.md`: Worker Prompt 模板加入 --parent 说明
+
+### 改动文件汇总
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/pages/chat/MessageItem.tsx` | `stripSystemMarker()` 截断 system 标记 |
+| `frontend/src/pages/chat/MessageList.tsx` | 智能滚动：底部跟随 + 历史浏览不打断 |
+| `frontend/src/store/messageStore.ts` | `/session` slash 命令 |
+| `webserver.py` | `POST /api/sessions/parents` 单条追加 API |
+| `nanobot/usage/recorder.py` | `get_session_usage()` 增加 cache 字段 |
+| `nanobot/agent/loop.py` | `/session` 命令增加 cache 信息 |
+| `skills/web-subsession/scripts/create_subsession.sh` | `--parent` 参数 |
+| `skills/web-subsession/SKILL.md` | 文档更新 |
+| `skills/batch-orchestrator/SKILL.md` | 文档更新 |
