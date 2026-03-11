@@ -243,7 +243,11 @@ export default function MessageList() {
 
     // Subsequent updates: check context
     if (messages.length > prevMsgCountRef.current) {
-      if (userSentRef.current) {
+      // Check if this is a turn-end reload (sending just went true → false)
+      const isTurnEnd = prevSendingRef.current && !isCurrentSessionSending;
+      if (isTurnEnd) {
+        // Turn just ended — skip auto-scroll, let turn-end handler decide (show button or not)
+      } else if (userSentRef.current) {
         // User just sent a message — always scroll to bottom
         userSentRef.current = false;
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -272,10 +276,12 @@ export default function MessageList() {
     prevSendingRef.current = isCurrentSessionSending;
 
     if (wasSending && !isCurrentSessionSending) {
-      // Turn just ended — check if user is not near bottom
-      if (!isNearBottom()) {
-        setShowScrollToBottom(true);
-      }
+      // Turn just ended — after DOM settles, check if user is not near bottom → show button
+      requestAnimationFrame(() => {
+        if (!isNearBottom()) {
+          setShowScrollToBottom(true);
+        }
+      });
     }
   }, [isCurrentSessionSending, isNearBottom]);
 
