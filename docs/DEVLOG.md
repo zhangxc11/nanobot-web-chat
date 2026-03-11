@@ -466,3 +466,36 @@ Web worker 模式下，每次 HTTP 请求创建新的 `AgentLoop → SubagentMan
 | `frontend/src/hooks/useSubagentStatus.ts` | 新文件：subagent 进度轮询 hook |
 | `frontend/src/pages/chat/Sidebar/SessionList.tsx` | 集成 hooks，显示运行标识和进度 |
 | `frontend/src/pages/chat/Sidebar/Sidebar.module.css` | 脉冲绿点动画 + 进度文字样式 |
+
+---
+
+## Phase 57 Hotfix: Session 列表轮询闪烁修复 (§五十) ✅
+
+**日期**: 2026-03-11
+**需求**: §五十
+**Commits**: `66cd02a` (源码修复) + 手动 `npm run build` (dist 重构建)
+
+### 问题现象
+
+§四十八~§四十九 引入 `useRunningSessions`（10s 轮询）和 `useSubagentStatus`（5s 轮询）后，session 列表在任务执行期间每 10 秒闪烁一次（列表消失再出现）。
+
+### 根因
+
+1. **引用不稳定**：两个 hook 每次轮询无条件创建新 Set/Map 引用 → React 认为 state 变化 → 触发重渲染
+2. **loading 门控**：`fetchSessions()` 无条件设 `loading: true` → `Sidebar.tsx` 根据 loading 隐藏 SessionList → 闪烁
+3. **dist 未重构建**：66cd02a 修改源码后未执行 `npm run build`，浏览器仍加载旧 bundle
+
+### 修复内容
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/hooks/useRunningSessions.ts` | `setRunningKeys()` 移到 changed 判断内部 |
+| `frontend/src/hooks/useSubagentStatus.ts` | 新增 `mapsEqual()` 深比较，仅变化时 setState |
+| `frontend/src/store/sessionStore.ts` | `fetchSessions()` 已有数据时静默刷新（不设 loading） |
+| `frontend/src/pages/chat/Sidebar/Sidebar.tsx` | 移除 loading 门控，SessionList 始终渲染 |
+
+### 经验教训
+
+- **前端修复必须包含 `npm run build`**：源码修改不等于生效，dist 中的 bundle 才是浏览器加载的文件
+- **轮询 hook 必须做引用稳定性检查**：React state 更新基于引用比较，每次创建新对象即使内容相同也会触发重渲染
+- **loading 状态应区分首次加载与后台刷新**：首次加载可以显示 skeleton/loading，后台静默刷新不应影响已渲染的 UI

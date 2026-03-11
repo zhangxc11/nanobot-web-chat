@@ -11,6 +11,7 @@
 | §十六 | Provider 动态切换 (v4.3) |
 | §十七 | Session Tag 功能 |
 | §十八 | Cache Usage 字段与 SQLite Migration |
+| §十九 | Subagent 可见性 — 实时运行状态 |
 
 ---
 
@@ -705,6 +706,104 @@ webserver.py _try_record_usage()
 | UsageIndicator（展开） | cache_creation / cache_read 明细 |
 | UsagePage | cache 汇总卡片（总创建 / 总读取） |
 | MessageItem | 工具调用摘要中显示 cache hit/creation |
+
+---
+
+## 十九、Subagent 可见性 — 实时运行状态 (v5.7)
+
+### 19.1 架构概览
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Frontend                          │
+│                                                      │
+│  useRunningSessions (10s poll)                        │
+│    └─ GET /api/sessions/running                      │
+│    └─ 返回 Set<sessionKey>                           │
+│    └─ 变化时触发 fetchSessions() 刷新列表             │
+│                                                      │
+│  useSubagentStatus (5s poll, 仅运行中时激活)           │
+│    └─ GET /api/subagents/<parentKey>                 │
+│    └─ 返回 Map<parentKey, SubagentInfo[]>            │
+│                                                      │
+│  SessionList                                         │
+│    └─ runningKeys → 绿色脉冲点                       │
+│    └─ subagentMap → ⚙️ 5/30 · tool_name 进度        │
+└───────────────┬─────────────────┬────────────────────┘
+                │                 │
+          ┌─────▼─────┐   ┌──────▼──────┐
+          │ Webserver  │   │ Webserver   │
+          │ proxy GET  │   │ proxy GET   │
+          │ /sessions/ │   │ /subagents/ │
+          │ running    │   │ <parent>    │
+          └─────┬──────┘   └──────┬──────┘
+                │                 │
+          ┌─────▼─────────────────▼──────┐
+          │          Worker              │
+          │                              │
+          │  WorkerSubagentCallback      │
+          │    ._registry: Dict          │
+          │    .get_all_running_keys()   │
+          │    .get_subagents_for()      │
+          │                              │
+          │  SubagentManager             │
+          │    .event_callback = ↑       │
+          └──────────────────────────────┘
+```
+
+### 19.2 后端数据流
+
+**WorkerSubagentCallback** 实现 `SubagentEventCallback` 协议，维护 `_registry` 字典：
+
+| 事件 | 回调方法 | registry 操作 |
+|------|----------|---------------|
+| subagent 启动 | `on_spawned()` | 注册 entry（task_id, label, parent_key, status=running） |
+| 迭代进度 | `on_progress()` | 更新 current_iteration, last_tool_name |
+| 重试 | `on_retry()` | 更新 retry_count |
+| 完成/失败 | `on_done()` | 设置 status=done/error, finished_at |
+
+**HTTP 端点**:
+- `GET /sessions/running` — 合并 regular tasks（worker._running_tasks）+ subagent tasks → 去重返回所有运行中 session key
+- `GET /subagents/<parent_key>` — 从 registry 过滤指定 parent 的 subagent 列表
+
+### 19.3 前端轮询策略
+
+**引用稳定性设计**（§五十 修复后）:
+
+| Hook | 轮询间隔 | 更新策略 |
+|------|----------|----------|
+| `useRunningSessions` | 10s | 对比新旧 Set 内容（排序后 join），仅变化时 setState |
+| `useSubagentStatus` | 5s | `mapsEqual()` JSON 序列化深比较，仅变化时 setState |
+
+**fetchSessions() 静默刷新**:
+- 首次加载（sessions 为空）：设 `loading: true`，显示加载状态
+- 后台刷新（已有数据）：直接更新 sessions 数组，不设 loading，UI 无闪烁
+
+### 19.4 前端组件集成
+
+```
+SessionList
+  ├─ useRunningSessions() → runningKeys: Set<string>
+  ├─ useSubagentStatus(runningKeys) → subagentMap: Map<string, SubagentInfo[]>
+  │
+  ├─ SessionGroup
+  │   └─ SessionItem
+  │       ├─ runningKeys.has(key) → <span class="runningIndicator" />  (8px 脉冲绿点)
+  │       └─ ChildrenPanel
+  │           └─ ChildItem
+  │               ├─ runningKeys.has(key) → <span class="runningIndicatorSmall" />  (6px)
+  │               └─ subagentMap.get(key) → <div class="subagentStatus">⚙️ 5/30 · read_file</div>
+```
+
+### 19.5 CSS 动画
+
+```css
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.runningIndicator { animation: pulse 2s ease-in-out infinite; }
+```
 
 ---
 

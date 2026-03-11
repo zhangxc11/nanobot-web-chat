@@ -57,7 +57,7 @@ nanobot Web Chat 是一个 React + TypeScript 的 Web 聊天界面，通过 Webs
 | 前端 | [architecture/frontend.md](architecture/frontend.md) | §二 | ~215 | 目录结构/组件层级/状态管理/工具调用渲染 |
 | 后端API | [architecture/backend-api.md](architecture/backend-api.md) | §三+§四+§十一 | ~290 | API设计/交互流程/功能模块API |
 | 基础设施 | [architecture/infra.md](architecture/infra.md) | §八~§十+§十四 | ~331 | 安全架构/Gateway+Worker拆分/优雅降级/SDK演进 |
-| 功能模块 | [architecture/features.md](architecture/features.md) | §十二+§十三+§十五~§十八 | ~711 | 执行体验/Token统计/斜杠命令/Provider/Tag/Cache |
+| 功能模块 | [architecture/features.md](architecture/features.md) | §十二+§十三+§十五~§十九 | ~800 | 执行体验/Token统计/斜杠命令/Provider/Tag/Cache/Subagent可见性 |
 
 ---
 
@@ -83,3 +83,4 @@ nanobot Web Chat 是一个 React + TypeScript 的 Web 聊天界面，通过 Webs
 | §十六 | Provider 动态切换 | features.md |
 | §十七 | Session Tag | features.md |
 | §十八 | Cache Usage + SQLite Migration | features.md |
+| §十九 | Subagent 可见性 — 实时运行状态 | features.md |

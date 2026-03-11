@@ -78,6 +78,9 @@
 | §四十五 | SSE 刷新保持用户浏览位置 | v5.6 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 | §四十六 | /session 命令补充 cache 信息 + web 端支持 | v5.6 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 | §四十七 | web-subsession 父子关系注册 | v5.6 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §四十八 | Subagent 可见性 — 后端 API | v5.7 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §四十九 | Subagent 可见性 — 前端运行标识 | v5.7 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §五十 | Bug 修复 — Session 列表轮询闪烁 | v5.7.1 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 
 ---
 
