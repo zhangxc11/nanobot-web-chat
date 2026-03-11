@@ -422,3 +422,47 @@ Web worker 模式下，每次 HTTP 请求创建新的 `AgentLoop → SubagentMan
 | `skills/web-subsession/scripts/create_subsession.sh` | `--parent` 参数 |
 | `skills/web-subsession/SKILL.md` | 文档更新 |
 | `skills/batch-orchestrator/SKILL.md` | 文档更新 |
+
+---
+
+## Phase 57: Subagent 可见性 — 运行标识与进度 (§四十八~§四十九) ✅
+
+**日期**: 2026-03-11
+**需求**: §四十八~§四十九
+
+### 任务清单
+
+- [x] §四十八 Subagent 可见性后端 API（worker + webserver proxy）
+- [x] §四十九 前端运行标识（绿点动画 + subagent 进度）
+
+### §四十八 实现
+
+- `worker.py`: 新增 `WorkerSubagentCallback` 类，实现 SubagentEventCallback 协议
+  - `_registry` 字典跟踪 subagent 全生命周期（spawned/progress/retry/done）
+  - `get_all_running_session_keys()` 合并 regular tasks + subagent tasks
+  - `get_subagents_for_parent()` 按父 session key 查询
+  - 注册为 `SubagentManager` 的 `event_callback`
+- `worker.py`: 新增 HTTP 端点 `GET /sessions/running` 和 `GET /subagents/<parent_key>`
+- `webserver.py`: 新增 proxy 方法 `_handle_proxy_running_sessions()` 和 `_handle_proxy_subagents()`
+
+### §四十九 实现
+
+- `frontend/src/services/api.ts`: 新增 `fetchRunningSessions()` 和 `fetchSubagents()` API 函数
+- `frontend/src/hooks/useRunningSessions.ts`: 轮询运行状态（10s），检测变化触发 session list 刷新
+- `frontend/src/hooks/useSubagentStatus.ts`: 轮询 subagent 进度（5s），仅在有运行 session 时激活
+- `frontend/src/pages/chat/Sidebar/SessionList.tsx`:
+  - 集成两个 hook，传递 runningKeys/subagentMap 到所有层级组件
+  - SessionItem/ChildrenPanel 显示绿色脉冲点（运行中）和进度行（⚙️ 5/30 · tool_name）
+- `frontend/src/pages/chat/Sidebar/Sidebar.module.css`: 新增 `.runningIndicator`、`.runningIndicatorSmall`、`.subagentStatus`、`.subagentStatusSmall` 样式 + pulse 动画
+
+### 改动文件汇总
+
+| 文件 | 改动 |
+|------|------|
+| `worker.py` | WorkerSubagentCallback + HTTP 端点 |
+| `webserver.py` | proxy 方法 _handle_proxy_running_sessions / _handle_proxy_subagents |
+| `frontend/src/services/api.ts` | fetchRunningSessions / fetchSubagents |
+| `frontend/src/hooks/useRunningSessions.ts` | 新文件：运行状态轮询 hook |
+| `frontend/src/hooks/useSubagentStatus.ts` | 新文件：subagent 进度轮询 hook |
+| `frontend/src/pages/chat/Sidebar/SessionList.tsx` | 集成 hooks，显示运行标识和进度 |
+| `frontend/src/pages/chat/Sidebar/Sidebar.module.css` | 脉冲绿点动画 + 进度文字样式 |

@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSessionStore } from '@/store/sessionStore';
+import { useRunningSessions } from '@/hooks/useRunningSessions';
+import { useSubagentStatus } from '@/hooks/useSubagentStatus';
+import type { SubagentInfo } from '@/services/api';
 import type { Session } from '@/types';
 import styles from './Sidebar.module.css';
 
@@ -292,6 +295,8 @@ interface SessionItemProps {
   messageCount: number;
   isActive: boolean;
   isDone: boolean;
+  isRunning: boolean;
+  subagentInfo?: SubagentInfo;
   descendantCount: number;
   onClick: () => void;
   onRename: (id: string, newName: string) => void;
@@ -301,7 +306,7 @@ interface SessionItemProps {
 
 function SessionItem({
   id, summary, filename, sessionKey, lastActiveAt,
-  isActive, isDone, descendantCount, onClick, onRename, onDelete, onToggleDone,
+  isActive, isDone, isRunning, subagentInfo, descendantCount, onClick, onRename, onDelete, onToggleDone,
 }: SessionItemProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(summary);
@@ -372,6 +377,7 @@ function SessionItem({
           />
         ) : (
           <div className={styles.sessionSummary}>
+            {isRunning && <span className={styles.runningIndicator} />}
             {isDone && <span className={styles.doneIcon}>✅</span>}
             <span className={styles.sessionSummaryText}>{displayTitle}</span>
             {descendantCount > 0 && (
@@ -409,6 +415,12 @@ function SessionItem({
         <span className={styles.sessionFilename}>{filename}</span>
         <span className={styles.sessionTime}>{formatTime(lastActiveAt)}</span>
       </div>
+      {subagentInfo && (
+        <div className={styles.subagentStatus}>
+          ⚙️ {subagentInfo.iteration}/{subagentInfo.max_iterations}
+          {subagentInfo.last_tool && ` · ${subagentInfo.last_tool}`}
+        </div>
+      )}
     </div>
   );
 }
@@ -419,6 +431,8 @@ function ChildrenPanel({
   depth,
   expandedKeys,
   tagsMap,
+  runningKeys,
+  subagentMap,
   onToggle,
   activeSessionId,
   onSelect,
@@ -430,6 +444,8 @@ function ChildrenPanel({
   depth: number;
   expandedKeys: Record<string, boolean>;
   tagsMap: Record<string, string[]>;
+  runningKeys: Set<string>;
+  subagentMap: Map<string, SubagentInfo[]>;
   onToggle: (key: string) => void;
   activeSessionId: string | null;
   onSelect: (id: string) => void;
@@ -445,10 +461,19 @@ function ChildrenPanel({
     <div className={styles.childrenPanel} style={{ paddingLeft: indent }}>
       {children.map((child) => {
         const ck = child.session.id;
+        const childSK = child.session.sessionKey || '';
         const isActive = child.session.id === activeSessionId;
         const isExpanded = expandedKeys[ck] === true;
         const hasChildren = child.children.length > 0;
         const childIsDone = (tagsMap[ck] || []).includes('done');
+        const childIsRunning = runningKeys.has(childSK);
+
+        // Find subagent info for this child across all parent entries
+        let childSubagentInfo: SubagentInfo | undefined;
+        for (const [, subs] of subagentMap) {
+          const match = subs.find((s) => s.session_key === childSK && s.status === 'running');
+          if (match) { childSubagentInfo = match; break; }
+        }
 
         return (
           <div key={ck} className={styles.childNodeWrapper}>
@@ -468,6 +493,7 @@ function ChildrenPanel({
                 onClick={() => onSelect(child.session.id)}
                 title={child.session.sessionKey}
               >
+                {childIsRunning && <span className={styles.runningIndicatorSmall} />}
                 {childIsDone && <span className={styles.doneIconSmall}>✅</span>}
                 <span className={styles.childItemTitle}>
                   {getDisplayTitle(child.session.summary, child.session.sessionKey || '', child.session.id)}
@@ -478,12 +504,20 @@ function ChildrenPanel({
                 <span className={styles.childItemTime}>{formatTime(child.session.lastActiveAt)}</span>
               </div>
             </div>
+            {childSubagentInfo && (
+              <div className={styles.subagentStatusSmall}>
+                ⚙️ {childSubagentInfo.iteration}/{childSubagentInfo.max_iterations}
+                {childSubagentInfo.last_tool && ` · ${childSubagentInfo.last_tool}`}
+              </div>
+            )}
             {hasChildren && isExpanded && (
               <ChildrenPanel
                 children={child.children}
                 depth={depth + 1}
                 expandedKeys={expandedKeys}
                 tagsMap={tagsMap}
+                runningKeys={runningKeys}
+                subagentMap={subagentMap}
                 onToggle={onToggle}
                 activeSessionId={activeSessionId}
                 onSelect={onSelect}
@@ -505,6 +539,8 @@ function SessionTreeItem({
   activeSessionId,
   expandedKeys,
   tagsMap,
+  runningKeys,
+  subagentMap,
   onToggleExpand,
   onSelect,
   onRename,
@@ -515,6 +551,8 @@ function SessionTreeItem({
   activeSessionId: string | null;
   expandedKeys: Record<string, boolean>;
   tagsMap: Record<string, string[]>;
+  runningKeys: Set<string>;
+  subagentMap: Map<string, SubagentInfo[]>;
   onToggleExpand: (key: string) => void;
   onSelect: (id: string) => void;
   onRename: (id: string, name: string) => void;
@@ -522,10 +560,19 @@ function SessionTreeItem({
   onToggleDone: (session: Session) => void;
 }) {
   const sk = node.session.id;
+  const sessionKey = node.session.sessionKey || '';
   const isActive = node.session.id === activeSessionId;
   const hasChildren = node.children.length > 0;
   const isExpanded = expandedKeys[sk] === true;
   const isDone = (tagsMap[sk] || []).includes('done');
+  const isRunning = runningKeys.has(sessionKey);
+
+  // Find subagent info for this session
+  let mySubagentInfo: SubagentInfo | undefined;
+  for (const [, subs] of subagentMap) {
+    const match = subs.find((s) => s.session_key === sessionKey && s.status === 'running');
+    if (match) { mySubagentInfo = match; break; }
+  }
 
   // Show children panel if: this node is active OR explicitly expanded
   const showChildren = hasChildren && (isActive || isExpanded);
@@ -542,6 +589,8 @@ function SessionTreeItem({
           messageCount={node.session.messageCount}
           isActive={isActive}
           isDone={isDone}
+          isRunning={isRunning}
+          subagentInfo={mySubagentInfo}
           descendantCount={node.descendantCount}
           onClick={() => onSelect(node.session.id)}
           onRename={onRename}
@@ -566,6 +615,8 @@ function SessionTreeItem({
               depth={0}
               expandedKeys={expandedKeys}
               tagsMap={tagsMap}
+              runningKeys={runningKeys}
+              subagentMap={subagentMap}
               onToggle={onToggleExpand}
               activeSessionId={activeSessionId}
               onSelect={onSelect}
@@ -602,11 +653,28 @@ export default function SessionList() {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
 
+  // §48: Poll running sessions
+  const runningKeys = useRunningSessions();
+
   // Build tree
   const { roots } = useMemo(
     () => buildSessionTree(sessions, parentMap),
     [sessions, parentMap],
   );
+
+  // §49: Collect parent session keys that have children, for subagent polling
+  const parentSessionKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const node of roots) {
+      if (node.children.length > 0 && node.session.sessionKey) {
+        keys.push(node.session.sessionKey);
+      }
+    }
+    return keys;
+  }, [roots]);
+
+  // §49: Poll subagent status
+  const subagentMap = useSubagentStatus(parentSessionKeys, runningKeys);
 
   // Filter out "done" root sessions when hideDone is on
   const filteredRoots = useMemo(() => {
@@ -678,6 +746,8 @@ export default function SessionList() {
                 activeSessionId={activeSessionId}
                 expandedKeys={expandedKeys}
                 tagsMap={tagsMap}
+                runningKeys={runningKeys}
+                subagentMap={subagentMap}
                 onToggleExpand={toggleExpand}
                 onSelect={setActiveSession}
                 onRename={handleRename}

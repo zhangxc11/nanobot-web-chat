@@ -792,3 +792,52 @@
 .childItemDone:hover {
   opacity: 0.8;
 }
+
+/* §48-§49: Running session indicators */
+
+.runningIndicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  margin-right: 6px;
+  flex-shrink: 0;
+  animation: runningPulse 2s ease-in-out infinite;
+}
+
+.runningIndicatorSmall {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  margin-right: 4px;
+  flex-shrink: 0;
+  animation: runningPulse 2s ease-in-out infinite;
+}
+
+@keyframes runningPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.subagentStatus {
+  font-size: 11px;
+  color: #8b8b8b;
+  padding: 1px 12px 3px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subagentStatusSmall {
+  font-size: 10px;
+  color: #8b8b8b;
+  padding: 0 0 2px 24px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

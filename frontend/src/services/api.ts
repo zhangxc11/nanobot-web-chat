@@ -370,6 +370,34 @@ export async function setProvider(provider: string, model?: string): Promise<{ a
   return res.json();
 }
 
+// ── Running Sessions & Subagent Status (§48-§49) ──
+
+export async function fetchRunningSessions(): Promise<{ running: string[] }> {
+  const res = await fetch(`${API_BASE}/sessions/running`);
+  if (!res.ok) return { running: [] };
+  return res.json();
+}
+
+export interface SubagentInfo {
+  task_id: string;
+  label: string;
+  status: string;
+  session_key: string;
+  parent_session_key: string;
+  iteration: number;
+  max_iterations: number;
+  last_tool: string | null;
+  created_at: string;
+  error: string | null;
+  finished_at?: string;
+}
+
+export async function fetchSubagents(parentKey: string): Promise<{ subagents: SubagentInfo[] }> {
+  const res = await fetch(`${API_BASE}/subagents/${encodeURIComponent(parentKey)}`);
+  if (!res.ok) return { subagents: [] };
+  return res.json();
+}
+
 // ── SSE Streaming ──
 
 export interface StreamCallbacks {

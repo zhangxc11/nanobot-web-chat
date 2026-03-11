@@ -163,6 +163,101 @@ class WorkerSessionMessenger:
         return True
 
 
+# ── §47: WorkerSubagentCallback — subagent lifecycle tracking ──
+
+
+class WorkerSubagentCallback:
+    """Implements SubagentEventCallback protocol for web-chat worker.
+
+    Maintains a _registry dict mapping task_id → status info, queryable
+    via HTTP API endpoints for frontend consumption.
+    """
+
+    def __init__(self):
+        self._registry: dict[str, dict] = {}  # task_id -> status info
+        self._lock = threading.Lock()
+
+    def on_subagent_spawned(self, meta) -> None:
+        with self._lock:
+            self._registry[meta.task_id] = {
+                "task_id": meta.task_id,
+                "label": meta.label,
+                "status": "queued" if meta.status == "queued" else "running",
+                "session_key": meta.subagent_session_key,
+                "parent_session_key": meta.parent_session_key,
+                "iteration": 0,
+                "max_iterations": meta.max_iterations,
+                "last_tool": None,
+                "created_at": meta.created_at,
+                "error": None,
+            }
+
+    def on_subagent_progress(self, task_id: str, iteration: int, max_iterations: int, last_tool: str | None) -> None:
+        with self._lock:
+            if task_id in self._registry:
+                self._registry[task_id].update({
+                    "status": "running",
+                    "iteration": iteration,
+                    "max_iterations": max_iterations,
+                    "last_tool": last_tool,
+                })
+
+    def on_subagent_retry(self, task_id: str, attempt: int, max_retries: int, delay: float, error: str, is_fast: bool) -> None:
+        with self._lock:
+            if task_id in self._registry:
+                self._registry[task_id].update({
+                    "status": "retrying",
+                    "retry_info": {
+                        "attempt": attempt,
+                        "max_retries": max_retries,
+                        "delay": delay,
+                        "error": error,
+                        "is_fast": is_fast,
+                    },
+                })
+
+    def on_subagent_done(self, task_id: str, status: str, error: str | None) -> None:
+        with self._lock:
+            if task_id in self._registry:
+                self._registry[task_id].update({
+                    "status": status,  # "completed" / "failed" / "stopped" / "max_iterations"
+                    "error": error,
+                    "finished_at": datetime.now().isoformat(),
+                })
+
+    def get_subagents_for_parent(self, parent_session_key: str) -> list[dict]:
+        """Return all subagent statuses for a given parent session."""
+        with self._lock:
+            return [
+                dict(info) for info in self._registry.values()
+                if info.get("parent_session_key") == parent_session_key
+            ]
+
+    def get_all_running_session_keys(self) -> list[str]:
+        """Return session keys of all currently running (non-terminal) sessions.
+
+        Includes both regular tasks from _tasks registry and subagent tasks.
+        """
+        running_keys: list[str] = []
+        # 1. Regular tasks from _tasks registry
+        with _tasks_lock:
+            for key, task in _tasks.items():
+                if task['status'] == 'running':
+                    running_keys.append(key)
+        # 2. Subagent tasks from our registry
+        with self._lock:
+            for info in self._registry.values():
+                if info["status"] in ("running", "queued", "retrying"):
+                    sk = info.get("session_key")
+                    if sk and sk not in running_keys:
+                        running_keys.append(sk)
+        return running_keys
+
+
+# Module-level singleton
+_subagent_callback = WorkerSubagentCallback()
+
+
 # ── §40: SubagentManager singleton ──
 # Shared across all AgentLoop instances within this worker process.
 # Ensures subagent metadata (_task_meta, _session_tasks) persists across
@@ -203,6 +298,7 @@ def _get_subagent_manager():
             session_manager=SessionManager(config.workspace_path),
             task_keeper=_keep_subagent_task,
             session_messenger=WorkerSessionMessenger(),
+            event_callback=_subagent_callback,  # §47: lifecycle tracking
         )
         logger.info("SubagentManager singleton created")
         return _subagent_manager
@@ -594,6 +690,15 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             session_key = session_key.replace('%3A', ':').replace('%3a', ':')
             self._handle_get_task(session_key)
             return
+        # §47: Subagent status endpoints
+        if path == '/sessions/running':
+            self._handle_get_running_sessions()
+            return
+        if path.startswith('/subagents/'):
+            parent_key = path[11:]  # len('/subagents/') == 11
+            parent_key = parent_key.replace('%3A', ':').replace('%3a', ':')
+            self._handle_get_subagents(parent_key)
+            return
         self._send_json({'error': 'Not found'}, 404)
 
     # ── Legacy blocking endpoint ──
@@ -967,6 +1072,18 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         if task.get('usage'):
             result['usage'] = task['usage']
         self._send_json(result)
+
+    # ── §47: Subagent status endpoints ──
+
+    def _handle_get_running_sessions(self):
+        """GET /sessions/running — return currently running session keys."""
+        running_keys = _subagent_callback.get_all_running_session_keys()
+        self._send_json({'running': running_keys})
+
+    def _handle_get_subagents(self, parent_session_key):
+        """GET /subagents/<parent_session_key> — return subagent statuses."""
+        subagents = _subagent_callback.get_subagents_for_parent(parent_session_key)
+        self._send_json({'subagents': subagents})
 
     def _send_sse(self, event, data):
         """Send a single SSE event."""

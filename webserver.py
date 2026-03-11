@@ -233,6 +233,16 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_task_status(route_params['id'])
             return
 
+        # §47: Subagent status proxy routes
+        if path == '/api/sessions/running':
+            self._handle_proxy_running_sessions()
+            return
+
+        if path.startswith('/api/subagents/'):
+            parent_key = path[len('/api/subagents/'):]
+            self._handle_proxy_subagents(parent_key)
+            return
+
         if path.startswith('/api/'):
             self._send_json({'error': 'Not found'}, 404)
             return
@@ -1419,6 +1429,35 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({'error': 'Worker unavailable'}, 502)
         except Exception as e:
             logger.error(f"Provider reload error: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_proxy_running_sessions(self):
+        """GET /api/sessions/running — forward to worker GET /sessions/running."""
+        try:
+            req = urllib.request.Request(f'{WORKER_URL}/sessions/running', method='GET')
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            self._send_json(data)
+        except urllib.error.URLError as e:
+            logger.error(f"Worker unavailable for running sessions: {e}")
+            self._send_json({'error': 'Worker unavailable'}, 502)
+        except Exception as e:
+            logger.error(f"Running sessions error: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_proxy_subagents(self, parent_key):
+        """GET /api/subagents/<parent_key> — forward to worker GET /subagents/<parent_key>."""
+        try:
+            encoded_key = urllib.parse.quote(parent_key, safe='')
+            req = urllib.request.Request(f'{WORKER_URL}/subagents/{encoded_key}', method='GET')
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            self._send_json(data)
+        except urllib.error.URLError as e:
+            logger.error(f"Worker unavailable for subagents query: {e}")
+            self._send_json({'error': 'Worker unavailable'}, 502)
+        except Exception as e:
+            logger.error(f"Subagents query error: {e}")
             self._send_json({'error': str(e)}, 500)
 
     def _handle_send_message(self, session_id):
