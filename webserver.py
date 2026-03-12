@@ -1330,7 +1330,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
 
         session_key = self._get_session_key(session_id)
         encoded_key = urllib.parse.quote(session_key, safe='')
-        logger.info(f"Inject message into task: session={session_id}, message={message[:80]}...")
+        logger.info(f"Inject message into task: session={session_id}, message={message}")
 
         try:
             body = json.dumps({'message': message}).encode('utf-8')
@@ -1475,7 +1475,7 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         images = data.get('images') or None  # list of file paths or None
 
         session_key = self._get_session_key(session_id)
-        logger.info(f"Send message to session {session_id} (key={session_key}): {message[:80]}..., images={len(images) if images else 0}")
+        logger.info(f"Send message to session {session_id} (key={session_key}): {message}, images={len(images) if images else 0}")
 
         # Forward to worker's SSE streaming endpoint
         sse_headers_sent = False

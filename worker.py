@@ -710,7 +710,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         session_key = data['session_key'].strip()
         message = data['message'].strip()
 
-        logger.info(f"Execute (blocking): session={session_key}, message={message[:80]}...")
+        logger.info(f"Execute (blocking): session={session_key}, message={message}")
 
         try:
             runner = _create_runner()
@@ -747,7 +747,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         message = data['message'].strip()
         images = data.get('images') or None  # list of file paths or None
 
-        logger.info(f"Stream: session={session_key}, message={message[:80]}..., images={len(images) if images else 0}")
+        logger.info(f"Stream: session={session_key}, message={message}, images={len(images) if images else 0}")
 
         # Check if there's already a running task for this session
         # NOTE: Do NOT call _attach_to_existing_task inside the lock!
@@ -944,7 +944,7 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
 
         # Put message into the inject queue — will be picked up by check_user_input()
         task['_inject_queue'].put(f"[Message from user during execution]\n{message}")
-        logger.info(f"Injected message into task: session={session_key}, message={message[:80]}...")
+        logger.info(f"Injected message into task: session={session_key}, message={message}")
 
         self._send_json({'status': 'injected', 'message': 'Message queued for injection'})
 
