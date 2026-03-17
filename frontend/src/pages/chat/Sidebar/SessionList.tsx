@@ -86,98 +86,8 @@ interface SessionTreeNode {
 }
 
 /**
- * Resolve the parent session id for a session.
- * All lookups are based on session.id (filename without .jsonl), which is globally unique.
- *
- * 1. Check manual parentMap (highest priority) — now keyed by id
- * 2. Heuristic A: subagent sessions parse parent from id
- *    id format: subagent_{parent_channel}_{parent_payload}_{8hex}
- *    e.g. subagent_webchat_1772696251_abc12345 → parent id: webchat_1772696251
- * 3. Heuristic B: webchat API sessions — extract 10-digit timestamp, find matching parent
- *    Search priority:
- *      a) Exact: any session id matching {channel}_{timestamp} (e.g. webchat_1772696251, cli_1772696251)
- *      b) Suffix: any session id ending with _{timestamp} (e.g. webchat_dispatch_1772696251_1772700001)
- * 4. Return null if no parent found (root session)
- */
-function resolveParent(
-  session: Session,
-  parentMap: Record<string, string>,
-  allSessionIds?: Set<string>,
-): string | null {
-  const id = session.id || '';
-
-  // 1. Manual override — check by id
-  if (parentMap[id]) return parentMap[id];
-
-  // 2. Subagent heuristic: subagent_{parent_sanitized}_{8hex}
-  //    In id format, the channel separator is '_' (not ':').
-  //    subagent_webchat_1772696251_abc12345 → parent: webchat_1772696251
-  if (id.startsWith('subagent_')) {
-    const suffix = id.substring('subagent_'.length);
-    const match = suffix.match(/^(.+)_([0-9a-f]{8})$/);
-    if (match) {
-      const parentId = match[1]; // e.g. webchat_1772696251
-      // Verify parent exists in loaded sessions
-      if (allSessionIds && allSessionIds.has(parentId)) {
-        return parentId;
-      }
-      // If not found directly, return anyway (parentMap may have it)
-      return parentId;
-    }
-  }
-
-  // 3. Webchat API session heuristic: webchat_<role>_<10-digit-timestamp>_<detail>
-  //    Extract the FIRST 10-digit timestamp, then search for parent session.
-  //    Search priority:
-  //      a) Exact: any session id matching {channel}_{timestamp} pattern
-  //         (e.g. webchat_1772696251, cli_1772696251)
-  //      b) Suffix: any session id ending with _{timestamp}
-  //         (e.g. webchat_dispatch_1772696251_1772700001)
-  //    This supports:
-  //      - Cross-channel parents (cli_xxx, feishu.lab_xxx, webchat_xxx)
-  //      - Three-level trees: master → dispatch → worker
-  if (id.startsWith('webchat_')) {
-    const suffix = id.substring('webchat_'.length);
-    // Only for API sessions (suffix contains non-digit chars)
-    if (/[^0-9]/.test(suffix)) {
-      const tsMatch = suffix.match(/_(\d{10})(?:_|$)/);
-      if (tsMatch && allSessionIds) {
-        const ts = tsMatch[1];
-        // Priority a: exact match — session id like {channel}_{timestamp}
-        // This matches patterns like webchat_1772696251, cli_1772696251
-        // We look for ids where the part after the channel prefix is exactly the timestamp
-        for (const candidate of allSessionIds) {
-          // Check if candidate ends with _{ts} AND the part before is a simple channel prefix
-          // i.e., candidate is like "webchat_1772696251" or "cli_1772696251"
-          if (candidate.endsWith('_' + ts)) {
-            // Ensure this is a root session (channel_timestamp pattern, no extra underscores in between)
-            const prefix = candidate.substring(0, candidate.length - ts.length - 1);
-            // For channel.subchannel format (feishu.lab), check the part before dot
-            // Root session patterns: webchat_ts, cli_ts, feishu.lab_ts, feishu.lab_ou_xxx_ts
-            // We need to distinguish root sessions from other sessions ending with _ts
-            // Root: the prefix is a channel name (no digits, or channel.subchannel)
-            // A simple heuristic: if prefix doesn't contain any 10-digit number, it's likely a root
-            if (!/\d{10}/.test(prefix) && candidate !== id) {
-              return candidate;
-            }
-          }
-        }
-        // Priority b: suffix match — session ending with _<timestamp>
-        // This enables three-level trees (worker → dispatch)
-        for (const candidate of allSessionIds) {
-          if (candidate !== id && candidate.endsWith('_' + ts)) {
-            return candidate;
-          }
-        }
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
  * Build the full session tree.
+ * parentMap is fetched from /api/sessions/tree (computed by nanobot core).
  * All lookups use session.id (globally unique), NOT sessionKey.
  * Returns: { roots, nodeByKey }
  *   - roots: sessions that have no parent (or parent not found)
@@ -190,22 +100,16 @@ function buildSessionTree(
   roots: SessionTreeNode[];
   nodeByKey: Map<string, SessionTreeNode>;
 } {
-  // Collect all session ids
-  const allSessionIds = new Set<string>();
-  for (const s of sessions) {
-    allSessionIds.add(s.id);
-  }
-
   // Create tree nodes keyed by id
   const nodeByKey = new Map<string, SessionTreeNode>();
   for (const s of sessions) {
     nodeByKey.set(s.id, { session: s, children: [], descendantCount: 0 });
   }
 
-  // Assign children
+  // Assign children using parentMap from API
   const childSessionIds = new Set<string>();
   for (const s of sessions) {
-    const parentId = resolveParent(s, parentMap, allSessionIds);
+    const parentId = parentMap[s.id] || null;
     if (!parentId) continue;
 
     const parentNode = nodeByKey.get(parentId);

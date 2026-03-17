@@ -58,6 +58,9 @@ logger.addHandler(_sh)
 _async_loop: asyncio.AbstractEventLoop | None = None
 _async_thread: threading.Thread | None = None
 
+# ── Worker-global CronService singleton ──
+_worker_cron_service = None  # Set in main(), used by _create_runner()
+
 
 def _start_async_loop():
     """Start a dedicated asyncio event loop in a background thread."""
@@ -161,6 +164,52 @@ class WorkerSessionMessenger:
         _run_task_sdk(target_session_key, prefixed, channel='session_messenger')
         logger.info(f"SessionMessenger: triggered new task for {target_session_key}")
         return True
+
+
+# ── WorkerCronExecutor — CronExecutor protocol for web-chat worker ──
+
+
+class WorkerCronExecutor:
+    """CronExecutor for web-chat worker — executes cron jobs via _run_task_sdk."""
+
+    async def execute_job(self, job) -> str | None:
+        """Create a new cron session and execute the job."""
+        reminder_note = (
+            f"⏰ {job.name}\n\n"
+            f"{job.payload.message}"
+        )
+        _run_task_sdk(
+            f"cron:{job.id}",
+            reminder_note,
+            channel=job.payload.channel or "web",
+        )
+        logger.info(f"WorkerCronExecutor: started task for cron job '{job.name}' ({job.id})")
+        return None  # async execution, no immediate response
+
+    async def send_to_session(self, target_session_key: str, message: str, source: str | None = None) -> bool:
+        """Send a message to an existing session."""
+        try:
+            if source:
+                prefixed = f"⏰ [cron:{source}] {message}"
+            else:
+                prefixed = message
+
+            with _tasks_lock:
+                task = _tasks.get(target_session_key)
+
+            if task and task['status'] == 'running':
+                # Running → inject
+                task['_inject_queue'].put({"role": "user", "content": prefixed})
+                logger.info(f"WorkerCronExecutor: injected into running task {target_session_key}")
+                return True
+
+            # Idle → trigger new task
+            _run_task_sdk(target_session_key, prefixed, channel='cron')
+            logger.info(f"WorkerCronExecutor: triggered new task for {target_session_key}")
+            return True
+        except Exception as e:
+            logger.error(f"WorkerCronExecutor.send_to_session failed: {e}")
+            return False
 
 
 # ── §47: WorkerSubagentCallback — subagent lifecycle tracking ──
@@ -321,7 +370,6 @@ def _create_runner():
     from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
     from nanobot.session.manager import SessionManager
-    from nanobot.cron.service import CronService
     from nanobot.usage.recorder import UsageRecorder
     from nanobot.usage.detail_logger import LLMDetailLogger
     from nanobot.audit.logger import AuditLogger
@@ -338,7 +386,10 @@ def _create_runner():
 
     bus = MessageBus()
     session_manager = SessionManager(config.workspace_path)
-    cron = CronService(data_dir / "cron")
+    # Use the worker-global CronService singleton (has scheduler lock + executor).
+    # Creating a new CronService per-runner would produce a "dead" instance
+    # (_scheduling=False, no executor) that can add jobs to disk but never arm timers.
+    cron = _worker_cron_service
     usage_recorder = UsageRecorder()
     detail_logger = LLMDetailLogger()
     audit_logger = AuditLogger()
@@ -1126,6 +1177,21 @@ if __name__ == '__main__':
     _start_async_loop()
     logger.info("Async event loop started")
 
+    # Start CronService on the async event loop
+    try:
+        from nanobot.cron.service import CronService
+        from nanobot.config.loader import get_data_dir
+        _cron_data_dir = get_data_dir()
+        _worker_cron_service = CronService(
+            _cron_data_dir / "cron" / "jobs.json",
+            executor=WorkerCronExecutor(),
+        )
+        asyncio.run_coroutine_threadsafe(_worker_cron_service.start(), _async_loop).result(timeout=10)
+        logger.info("CronService started in worker")
+    except Exception as e:
+        logger.warning(f"Failed to start CronService in worker: {e}")
+        _worker_cron_service = None
+
     # Verify config is loadable (fail fast on misconfiguration)
     try:
         pool = _get_pool()
@@ -1152,5 +1218,7 @@ if __name__ == '__main__':
             print("\n👋 Worker stopped.")
         logger.info("Worker stopped by user")
         server.server_close()
+        if _worker_cron_service:
+            _worker_cron_service.stop()
         if _async_loop:
             _async_loop.call_soon_threadsafe(_async_loop.stop)

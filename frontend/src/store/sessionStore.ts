@@ -40,18 +40,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     try {
       const [sessionsData, parentMap, tagsMap] = await Promise.all([
         api.fetchSessions(),
-        api.fetchSessionParents().catch(() => ({} as Record<string, string>)),
+        api.fetchSessionTree().catch(() => ({} as Record<string, string>)),
         api.fetchSessionTags().catch(() => ({} as Record<string, string[]>)),
       ]);
       const sessions = sessionsData.sessions || [];
-      // Filter out _comment and other meta keys
-      const cleanParentMap: Record<string, string> = {};
-      for (const [k, v] of Object.entries(parentMap)) {
-        if (!k.startsWith('_') && typeof v === 'string') {
-          cleanParentMap[k] = v;
-        }
-      }
-      set({ sessions, parentMap: cleanParentMap, tagsMap, loading: false });
+      set({ sessions, parentMap, tagsMap, loading: false });
       // Auto-select first session if none active
       if (!get().activeSessionId && sessions.length > 0) {
         set({ activeSessionId: sessions[0].id });

@@ -4,7 +4,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import type { ProgressStep } from '@/types';
 import type { SessionUsage } from '@/services/api';
 import * as api from '@/services/api';
-import MessageItem, { groupMessages, AssistantTurnGroup, SystemInjectCard } from './MessageItem';
+import MessageItem, { groupMessages, AssistantTurnGroup, SystemInjectCard, CronNotificationCard } from './MessageItem';
 import styles from './MessageList.module.css';
 
 /** Scroll-to-bottom floating button — appears when turn ends and user is not at bottom */
@@ -391,6 +391,9 @@ export default function MessageList() {
           }
           if (group.type === 'system-inject') {
             return <SystemInjectCard key={group.messages[0].id} message={group.messages[0]} />;
+          }
+          if (group.type === 'cron-notify') {
+            return <CronNotificationCard key={group.messages[0].id} message={group.messages[0]} />;
           }
           // assistant-turn: render compactly
           return <AssistantTurnGroup key={`turn-${idx}`} messages={group.messages} usageRecords={sessionUsage?.records} />;

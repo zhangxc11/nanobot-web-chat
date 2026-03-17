@@ -327,7 +327,7 @@ export default function MessageItem({ message }: MessageItemProps) {
 // ── Grouping logic ──
 
 export interface MessageGroup {
-  type: 'user' | 'assistant-turn' | 'system' | 'system-inject';
+  type: 'user' | 'assistant-turn' | 'system' | 'system-inject' | 'cron-notify';
   messages: Message[];
 }
 
@@ -335,6 +335,12 @@ export interface MessageGroup {
 function isSystemInjectByContent(content: string | ContentBlock[]): boolean {
   const text = typeof content === 'string' ? content : getTextContent(content);
   return text.startsWith('[Message from session');
+}
+
+/** Check if a message is a cron scheduled task notification (by content prefix) */
+function isCronNotification(content: string | ContentBlock[]): boolean {
+  const text = typeof content === 'string' ? content : getTextContent(content);
+  return text.startsWith('⏰');
 }
 
 export function groupMessages(messages: Message[]): MessageGroup[] {
@@ -362,6 +368,12 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
       // Check if this is a subagent notification disguised as user message
       if (isSystemInjectByContent(msg.content)) {
         groups.push({ type: 'system-inject', messages: [msg] });
+        i++;
+        continue;
+      }
+      // Check if this is a cron scheduled task notification
+      if (isCronNotification(msg.content)) {
+        groups.push({ type: 'cron-notify', messages: [msg] });
         i++;
         continue;
       }
@@ -642,6 +654,101 @@ export function SystemInjectCard({ message }: { message: Message }) {
       </div>
       {expanded && (
         <div className={styles.systemInjectBody}>
+          <MarkdownRenderer content={body} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Cron Notification Card (scheduled task reminders) ──
+
+/** Parse a cron notification message into structured parts */
+function parseCronNotification(content: string): { source: string; body: string } {
+  const lines = content.split('\n');
+  let source = '';
+  let bodyStart = 0;
+
+  // New Format A: "⏰ [cron:{source}] {message}" (send_to_session with source)
+  const cronSourceMatch = lines[0]?.match(/^⏰\s*\[cron:(.+?)\]\s*(.*)$/);
+  if (cronSourceMatch) {
+    source = cronSourceMatch[1];
+    // The rest of line 0 after the prefix is part of the body
+    const restOfFirstLine = cronSourceMatch[2];
+    const bodyLines = restOfFirstLine ? [restOfFirstLine] : [];
+    for (let i = 1; i < lines.length; i++) {
+      bodyLines.push(lines[i]);
+    }
+    const body = bodyLines.join('\n').trim();
+    return { source, body: body || content };
+  }
+
+  // New Format B: "⏰ {job.name}\n\n{job.payload.message}" (execute_job)
+  const emojiMatch = lines[0]?.match(/^⏰\s*(.*)$/);
+  if (emojiMatch) {
+    source = emojiMatch[1];
+    bodyStart = 1;
+  } else {
+    // Legacy Format A: "[Scheduled Task from cron:xxx]\n{message}"
+    const fromMatch = lines[0]?.match(/^\[Scheduled Task from cron:(.+?)\]$/);
+    if (fromMatch) {
+      source = fromMatch[1];
+      bodyStart = 1;
+    } else {
+      // Legacy Format B: "[Scheduled Task] Timer finished.\nTask 'xxx' has been triggered.\nScheduled instruction: ..."
+      const timerMatch = lines[0]?.match(/^\[Scheduled Task\]/);
+      if (timerMatch) {
+        bodyStart = 0;
+        for (let i = 0; i < lines.length; i++) {
+          const taskMatch = lines[i].match(/^Task '(.+?)' has been triggered/);
+          if (taskMatch) {
+            source = taskMatch[1];
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Skip empty lines after header
+  while (bodyStart < lines.length && lines[bodyStart].trim() === '') {
+    bodyStart++;
+  }
+
+  // Extract the meaningful body content
+  const bodyLines: string[] = [];
+  for (let i = bodyStart; i < lines.length; i++) {
+    const line = lines[i];
+    // Skip "Scheduled instruction:" label (legacy), keep the actual instruction
+    const instrMatch = line.match(/^Scheduled instruction:\s*(.*)$/);
+    if (instrMatch) {
+      if (instrMatch[1]) bodyLines.push(instrMatch[1]);
+      continue;
+    }
+    bodyLines.push(line);
+  }
+
+  const body = bodyLines.join('\n').trim();
+  return { source, body: body || content };
+}
+
+export function CronNotificationCard({ message }: { message: Message }) {
+  const content = getTextContent(message.content, 'user');
+  const { source, body } = parseCronNotification(content);
+
+  return (
+    <div className={styles.cronNotifyCard}>
+      <div className={styles.cronNotifyHeader}>
+        <span className={styles.cronNotifyIcon}>⏰</span>
+        <span className={styles.cronNotifyLabel}>
+          定时提醒{source ? ` · ${source}` : ''}
+        </span>
+        {message.timestamp && (
+          <span className={styles.cronNotifyTime}>{formatTimestamp(message.timestamp)}</span>
+        )}
+      </div>
+      {body && (
+        <div className={styles.cronNotifyBody}>
           <MarkdownRenderer content={body} />
         </div>
       )}

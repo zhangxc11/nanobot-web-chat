@@ -26,69 +26,26 @@ const PERIOD_OPTIONS: { key: Period; label: string }[] = [
 
 const PAGE_SIZE = 20;
 
-// ── Session parent resolution (reuse logic from SessionList) ──
+// ── Session parent resolution (uses parentMap from /api/sessions/tree) ──
 
 /**
- * Resolve the root ancestor for a session id using parentMap + heuristics.
+ * Resolve the root ancestor for a session id using parentMap from API.
  * Returns the root ancestor id (may be itself if no parent found).
  */
 function resolveRoot(
   sessionId: string,
   parentMap: Record<string, string>,
-  allIds: Set<string>,
 ): string {
   const visited = new Set<string>();
   let current = sessionId;
   while (true) {
     if (visited.has(current)) break; // cycle guard
     visited.add(current);
-    const parent = resolveParent(current, parentMap, allIds);
+    const parent = parentMap[current] || null;
     if (!parent) break;
     current = parent;
   }
   return current;
-}
-
-function resolveParent(
-  id: string,
-  parentMap: Record<string, string>,
-  allIds: Set<string>,
-): string | null {
-  // 1. Manual override
-  if (parentMap[id]) return parentMap[id];
-
-  // 2. Subagent heuristic
-  if (id.startsWith('subagent_')) {
-    const suffix = id.substring('subagent_'.length);
-    const match = suffix.match(/^(.+)_([0-9a-f]{8})$/);
-    if (match) return match[1];
-  }
-
-  // 3. Webchat API session heuristic
-  if (id.startsWith('webchat_')) {
-    const suffix = id.substring('webchat_'.length);
-    if (/[^0-9]/.test(suffix)) {
-      const tsMatch = suffix.match(/_(\d{10})(?:_|$)/);
-      if (tsMatch) {
-        const ts = tsMatch[1];
-        // Priority a: exact match — {channel}_{timestamp}
-        for (const candidate of allIds) {
-          if (candidate.endsWith('_' + ts) && candidate !== id) {
-            const prefix = candidate.substring(0, candidate.length - ts.length - 1);
-            if (!/\d{10}/.test(prefix)) return candidate;
-          }
-        }
-        // Priority b: suffix match
-        for (const candidate of allIds) {
-          if (candidate !== id && candidate.endsWith('_' + ts)) {
-            return candidate;
-          }
-        }
-      }
-    }
-  }
-
-  return null;
 }
 
 // ── SVG Line Chart ──
@@ -265,7 +222,7 @@ export default function UsagePage() {
       const [global, daily, parents] = await Promise.all([
         api.fetchUsage(p),
         api.fetchDailyUsage(365, p),
-        api.fetchSessionParents(),
+        api.fetchSessionTree(),
       ]);
       setGlobalUsage(global);
       setDailyUsage(daily);
@@ -290,13 +247,12 @@ export default function UsagePage() {
     // Build id set from session_id (which is session_key format like "webchat:xxx")
     // Convert to id format (underscore): "webchat:xxx" → "webchat_xxx"
     const idFromSessionId = (sid: string) => sid.replace(':', '_');
-    const allIds = new Set(sessions.map(s => idFromSessionId(s.session_id)));
 
     // Build root map
     const rootMap = new Map<string, typeof sessions>();
     for (const s of sessions) {
       const sid = idFromSessionId(s.session_id);
-      const root = resolveRoot(sid, parentMap, allIds);
+      const root = resolveRoot(sid, parentMap);
       if (!rootMap.has(root)) rootMap.set(root, []);
       rootMap.get(root)!.push(s);
     }

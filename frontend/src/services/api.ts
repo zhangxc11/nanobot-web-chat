@@ -18,6 +18,12 @@ export async function fetchSessionParents(): Promise<Record<string, string>> {
   return res.json();
 }
 
+export async function fetchSessionTree(): Promise<Record<string, string>> {
+  const res = await fetch(`${API_BASE}/sessions/tree`);
+  if (!res.ok) throw new Error(`Failed to fetch session tree: ${res.status}`);
+  return res.json();
+}
+
 export async function updateSessionParents(parents: Record<string, string>): Promise<void> {
   const res = await fetch(`${API_BASE}/sessions/parents`, {
     method: 'PUT',

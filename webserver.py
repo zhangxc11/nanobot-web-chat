@@ -182,6 +182,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_get_session_parents()
             return
 
+        if path == '/api/sessions/tree':
+            self._handle_get_sessions_tree()
+            return
+
         if path == '/api/sessions/tags':
             self._handle_get_session_tags()
             return
@@ -418,6 +422,16 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(data)
         except Exception as e:
             logger.error(f"Failed to read session parents: {e}")
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_get_sessions_tree(self):
+        """GET /api/sessions/tree — computed parent map from nanobot core."""
+        try:
+            from nanobot.session.parents import build_parent_map
+            parent_map = build_parent_map(SESSIONS_DIR)
+            self._send_json(parent_map)
+        except Exception as e:
+            logger.error(f"Failed to build sessions tree: {e}")
             self._send_json({'error': str(e)}, 500)
 
     def _handle_put_session_parents(self):
