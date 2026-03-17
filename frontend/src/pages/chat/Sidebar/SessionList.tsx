@@ -550,15 +550,30 @@ function ChannelGroupHeader({
   );
 }
 
+// ── Helpers: running check ──
+
+/** Check if a tree node or any of its descendants is running */
+function isNodeOrDescendantRunning(node: SessionTreeNode, runningKeys: Set<string>): boolean {
+  const sk = node.session.sessionKey || '';
+  if (runningKeys.has(sk)) return true;
+  return node.children.some(child => isNodeOrDescendantRunning(child, runningKeys));
+}
+
 // ── Main Component ──
 
-export default function SessionList() {
+interface SessionListProps {
+  showRunningOnly?: boolean;
+  runningKeys?: Set<string>;
+}
+
+export default function SessionList({ showRunningOnly = false, runningKeys: externalRunningKeys }: SessionListProps) {
   const { sessions, parentMap, tagsMap, hideDone, activeSessionId, setActiveSession, loading, error, fetchSessions, renameSession, deleteSession, toggleDone } = useSessionStore();
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
 
-  // §48: Poll running sessions
-  const runningKeys = useRunningSessions();
+  // §48: Poll running sessions — use external if provided, otherwise poll internally
+  const internalRunningKeys = useRunningSessions();
+  const runningKeys = externalRunningKeys ?? internalRunningKeys;
 
   // Build tree
   const { roots } = useMemo(
@@ -582,13 +597,19 @@ export default function SessionList() {
 
   // Filter out "done" root sessions when hideDone is on
   const filteredRoots = useMemo(() => {
-    if (!hideDone) return roots;
-    return roots.filter((node) => {
-      const key = node.session.id;
-      const tags = tagsMap[key] || [];
-      return !tags.includes('done');
-    });
-  }, [roots, hideDone, tagsMap]);
+    let result = roots;
+    if (hideDone) {
+      result = result.filter((node) => {
+        const key = node.session.id;
+        const tags = tagsMap[key] || [];
+        return !tags.includes('done');
+      });
+    }
+    if (showRunningOnly) {
+      result = result.filter((node) => isNodeOrDescendantRunning(node, runningKeys));
+    }
+    return result;
+  }, [roots, hideDone, tagsMap, showRunningOnly, runningKeys]);
 
   // Group roots by channel
   const groups = useMemo(() => groupByChannel(filteredRoots), [filteredRoots]);

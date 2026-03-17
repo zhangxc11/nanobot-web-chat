@@ -821,7 +821,10 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 existing = t
 
         if existing:
-            logger.warning(f"Task already running for session={session_key}, attaching SSE")
+            logger.warning(f"Task already running for session={session_key}, injecting user message and attaching SSE")
+            # Inject user message into the running task so it won't be lost
+            prefixed = f"[Message from user during execution]\n{message}"
+            existing['_inject_queue'].put({"role": "user", "content": prefixed})
             self._attach_to_existing_task(existing)
             return
 

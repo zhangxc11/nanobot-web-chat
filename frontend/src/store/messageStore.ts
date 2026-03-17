@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type { Message, SessionTask } from '../types';
 import * as api from '../services/api';
 import { useSessionStore } from './sessionStore';
+import { useProviderStore } from './providerStore';
 
 // Build version marker for cache busting
 const _BUILD_VERSION = '21.0';
@@ -54,6 +55,7 @@ interface MessageStore {
   sendMessage: (sessionId: string, content: string, images?: string[]) => Promise<void>;
   injectMessage: (sessionId: string, content: string) => Promise<void>;
   cancelTask: (sessionId: string) => Promise<void>;
+  refreshMessages: (sessionId: string) => Promise<void>;
   checkRunningTask: (sessionId: string) => Promise<void>;
   clearMessages: () => void;
   setDraft: (sessionId: string, text: string) => void;
@@ -139,6 +141,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       }));
     } catch (err) {
       set((s) => ({ loading: false, ..._setError(s, sessionId, String(err)) }));
+    }
+  },
+
+  /** Refresh messages without clearing first (preserves component state / expand-collapse) */
+  refreshMessages: async (sessionId) => {
+    try {
+      const data = await api.fetchMessages(sessionId, PAGE_SIZE);
+      set({
+        messages: data.messages || [],
+        hasMore: data.hasMore ?? false,
+      });
+    } catch {
+      // Silently ignore refresh errors — the UI still shows the old messages
     }
   },
 
@@ -311,7 +326,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               // Fetch provider info
               let providerLine = 'N/A';
               try {
-                const { useProviderStore } = await import('@/store/providerStore');
                 await useProviderStore.getState().fetchProvider();
                 const { active } = useProviderStore.getState();
                 if (active) {
@@ -358,7 +372,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             if (parts.length === 1) {
               // /provider — show status
               try {
-                const { useProviderStore } = await import('@/store/providerStore');
                 await useProviderStore.getState().fetchProvider();
                 const { active, available } = useProviderStore.getState();
                 if (!active) {
@@ -386,7 +399,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               const providerName = parts[1];
               const model = parts[2] || undefined;
               try {
-                const { useProviderStore } = await import('@/store/providerStore');
                 await useProviderStore.getState().switchProvider(providerName, model);
                 const { active } = useProviderStore.getState();
                 set((s) => ({

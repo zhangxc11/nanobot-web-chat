@@ -389,11 +389,11 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                 continue
 
             summary = session_names.get(session_id) or first_user_content or session_id
-            last_active = metadata.get('updated_at', '')
-            if not last_active:
-                mtime = os.path.getmtime(filepath)
-                from datetime import datetime
-                last_active = datetime.fromtimestamp(mtime).isoformat()
+            # Always use file mtime: append_message() updates mtime on every write,
+            # while metadata updated_at is only rewritten on save() and may be stale.
+            mtime = os.path.getmtime(filepath)
+            from datetime import datetime
+            last_active = datetime.fromtimestamp(mtime).isoformat()
 
             # Read session key from metadata
             session_key = metadata.get('key', '')

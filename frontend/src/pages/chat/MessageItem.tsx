@@ -3,6 +3,28 @@ import type { Message, ContentBlock } from '@/types';
 import { MarkdownRenderer } from '@/components/Markdown';
 import styles from './MessageList.module.css';
 
+/**
+ * Module-level set tracking which collapsible/tool-call elements are expanded.
+ * Keyed by stable IDs (tool call id, turn id, etc.).
+ * This survives component unmount/remount caused by message list refreshes,
+ * so user-expanded sections stay open across auto-refresh cycles.
+ */
+const _expandedIds = new Set<string>();
+
+/** Hook that syncs expand/collapse state with the module-level set */
+function usePersistedExpand(id: string): [boolean, () => void] {
+  const [expanded, setExpanded] = useState(() => _expandedIds.has(id));
+  const toggle = useCallback(() => {
+    setExpanded((prev) => {
+      const next = !prev;
+      if (next) _expandedIds.add(id);
+      else _expandedIds.delete(id);
+      return next;
+    });
+  }, [id]);
+  return [expanded, toggle];
+}
+
 /** Copy button component for message bubbles */
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -157,8 +179,8 @@ function formatToolArgs(argsJson: string): string {
 }
 
 /** Single tool call line — ↳ style, consistent with streaming progress */
-function ToolCallLine({ name, content, args }: { name: string; content: string; args?: string }) {
-  const [expanded, setExpanded] = useState(false);
+function ToolCallLine({ id, name, content, args }: { id: string; name: string; content: string; args?: string }) {
+  const [expanded, toggle] = usePersistedExpand(`tool_${id}`);
   const summary = truncateToolOutput(content);
   const formattedArgs = args ? formatToolArgs(args) : '';
 
@@ -166,7 +188,7 @@ function ToolCallLine({ name, content, args }: { name: string; content: string; 
     <div className={styles.toolCallLine}>
       <div
         className={styles.toolCallLineHeader}
-        onClick={() => setExpanded(!expanded)}
+        onClick={toggle}
         title="点击展开/折叠详情"
       >
         <span className={styles.toolCallArrowIcon}>↳</span>
@@ -212,7 +234,10 @@ function formatTokens(n: number): string {
 
 /** Collapsible group: preceding texts + tool calls */
 function ToolProcessCollapsible({ items, toolCount, usageRecords }: { items: ProcessItem[]; toolCount: number; usageRecords?: UsageRecord[] }) {
-  const [expanded, setExpanded] = useState(false);
+  // Derive a stable ID from the first tool item for persisted expand state
+  const firstToolId = items.find(i => i.type === 'tool')?.id
+    || (items[0]?.type === 'text' ? items[0].key : 'unknown');
+  const [expanded, toggle] = usePersistedExpand(`collapsible_${firstToolId}`);
 
   if (items.length === 0) return null;
 
@@ -220,7 +245,7 @@ function ToolProcessCollapsible({ items, toolCount, usageRecords }: { items: Pro
     <div className={styles.toolCallsCollapsible}>
       <div
         className={styles.toolCallsToggle}
-        onClick={() => setExpanded(!expanded)}
+        onClick={toggle}
       >
         <span className={styles.toolCallsIcon}>⚙</span>
         <span className={styles.toolCallsLabel}>
@@ -234,7 +259,7 @@ function ToolProcessCollapsible({ items, toolCount, usageRecords }: { items: Pro
             if (item.type === 'text') {
               return <PrecedingText key={item.key} content={item.content} />;
             }
-            return <ToolCallLine key={item.id} name={item.name} content={item.content} args={item.args} />;
+            return <ToolCallLine key={item.id} id={item.id} name={item.name} content={item.content} args={item.args} />;
           })}
           {usageRecords && usageRecords.length > 0 && (() => {
             const totalTokens = usageRecords.reduce((sum, r) => sum + r.total_tokens, 0);
@@ -282,7 +307,7 @@ export default function MessageItem({ message }: MessageItemProps) {
     return (
       <div className={`${styles.message} ${styles.assistantMessage}`}>
         <div className={styles.bubble}>
-          <ToolCallLine name={message.name || 'unknown'} content={getTextContent(content)} />
+          <ToolCallLine id={message.id} name={message.name || 'unknown'} content={getTextContent(content)} />
         </div>
       </div>
     );
@@ -632,7 +657,7 @@ function formatSubagentSource(source: string): string {
 }
 
 export function SystemInjectCard({ message }: { message: Message }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, toggle] = usePersistedExpand(`inject_${message.id}`);
   const content = getTextContent(message.content, 'user');
   const { source, body } = parseSystemInject(content);
   const displaySource = formatSubagentSource(source);
@@ -641,7 +666,7 @@ export function SystemInjectCard({ message }: { message: Message }) {
     <div className={styles.systemInjectCard}>
       <div
         className={styles.systemInjectHeader}
-        onClick={() => setExpanded(!expanded)}
+        onClick={toggle}
       >
         <span className={styles.systemInjectIcon}>🤖</span>
         <span className={styles.systemInjectLabel}>

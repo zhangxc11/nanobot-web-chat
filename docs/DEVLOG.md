@@ -90,6 +90,8 @@
 | Phase 57: Subagent 可见性 — 运行标识与进度 (§四十八~§五十) | ✅ 已完成 | main |
 | Phase 58: 闭合标签 + 滚动按钮 (§五十一~§五十二) | ✅ 已完成 | main |
 | Phase 58 Hotfix: 标签泄露 + 滚动修复 | ✅ 已完成 | main |
+| Phase 59: Plan D Hotfix — 并发消息丢失 + 前端最终刷新 + 滚动保持 (§五十五~§五十七) | ✅ 已完成 | feat/batch-20260313-plan-web-frontend |
+| Phase 59 Hotfix: Subagent Session 滚动位置保持修复 | ✅ 已完成 | feat/batch-20260313-plan-web-frontend |
 
 ---
 
@@ -558,3 +560,109 @@ Web worker 模式下，每次 HTTP 请求创建新的 `AgentLoop → SubagentMan
 | 文件 | 改动 |
 |------|------|
 | `frontend/src/pages/chat/MessageList.tsx` | auto-scroll useEffect 增加 `isTurnEnd` 判断跳过滚动 |
+
+---
+
+## Phase 59: Plan D Hotfix — 并发消息丢失 + 前端最终刷新 + 滚动保持 (§五十五~§五十七) ✅
+
+**日期**: 2026-03-17
+**需求**: §五十五（并发 task 时用户消息丢失修复）、§五十六（session 从 running 变为 idle 时前端最终刷新）、§五十七（自动刷新时保持滚动位置）
+**来源**: Plan B R2 验收 G2 / G6 + Plan D 验收反馈
+
+### 任务清单
+
+- [x] G2 修复: `worker.py` `_handle_execute_stream()` — 并发 task 时 inject 用户消息而非丢弃
+- [x] G6 修复: `MessageList.tsx` — 追踪 running→idle 状态变化，做最终刷新
+- [x] G6 配套: `messageStore.ts` — 新增 `refreshMessages()` 方法（不清空消息列表的刷新）
+- [x] G6 配套: `MessageItem.tsx` — 展开/折叠状态持久化（`usePersistedExpand` hook）
+- [x] §五十七: `MessageList.tsx` — auto-refresh 滚动逻辑改进：isNearBottom 检查，远离底部时保持 scrollTop
+- [x] 前端构建: `npm run build` 通过
+- [x] 文档补齐: 需求文档 + DEVLOG
+
+### 改动文件汇总
+
+| 文件 | 改动 |
+|------|------|
+| `worker.py` | `_handle_execute_stream()`: 并发 task 时 inject 用户消息到 `_inject_queue` |
+| `frontend/src/pages/chat/MessageList.tsx` | `wasRunningRef` + running→idle 最终刷新 + 轮询改用 `refreshMessages` + §五十七 滚动保持 |
+| `frontend/src/store/messageStore.ts` | 新增 `refreshMessages()` 方法 |
+| `frontend/src/pages/chat/MessageItem.tsx` | `usePersistedExpand` hook + 展开状态持久化 |
+| `docs/REQUIREMENTS.md` | 索引表新增 §五十五~§五十七 |
+| `docs/requirements/s44-s56.md` | §五十五~§五十七 正文 |
+| `docs/DEVLOG.md` | Phase 59 记录 |
+
+### Commits
+
+- `a541dd2` — 代码修复: inject user message on concurrent task (G2) + final refresh on task end (G6)
+- `84ba96b` — 文档补齐: G2/G6 需求 (§五十五~§五十六) + Phase 59 DEVLOG
+
+---
+
+## Phase 60: 自动刷新时保持滚动位置 (§五十七) ✅
+
+**日期**: 2026-03-17
+
+### 问题
+
+subagent session 的 auto-refresh 5s 轮询会强制把页面滚到底部，用户无法向上浏览历史。
+
+### 根因（两层）
+
+**第一层 — scroll 事件监听器从未绑定**：
+
+`useEffect([], [])` 在组件首次 render 时执行，但此时 MessageList 处于 loading/empty 的 early-return 状态，`scrollContainerRef.current` 为 `null`。scroll/wheel/pointer 事件监听器从未被 attach，`userScrolledAwayRef` 永远保持初始值 `false`。
+
+**第二层 — subagent session 无 SSE/attach**：
+
+subagent task 不在 worker `_tasks` 中（由 parent task 内部 `SubagentManager.spawn()` 创建，不经 `/execute` 端点）。`checkRunningTask` 的 `fetchTaskStatus` 返回 `{status: 'unknown'}`，不设 `sending=true`。auto-refresh interval 从 session 打开起就在运行，但因 `userScrolledAwayRef` 永远为 `false`，每次 tick 都执行 refresh + scrollIntoView → 用户被强制拉回底部。
+
+### 修复方案
+
+**1. callback ref 绑定事件监听（核心修复）**
+
+用 `scrollContainerCallbackRef` + `useState<HTMLDivElement | null>` 替代直接 `ref={scrollContainerRef}`。useEffect 依赖 `[scrollContainer]`，当 DOM 节点在 early-return 条件消除后出现时，重新执行并正确绑定事件监听器。
+
+**2. userScrolledAwayRef 粘性标志**
+
+用户滚离底部（>300px）时锁定为 `true`，只在用户主动交互（wheel/touch/pointer）回到底部时重置为 `false`。不受 DOM 高度变化、layout-driven scroll 影响。
+
+**3. userInteractingRef 交互检测**
+
+通过 wheel/touchstart/pointerdown 事件标记用户主动操作，区分用户滚动 vs 程序/布局触发的 scroll 事件。150ms 延迟清除，确保后续 scroll 事件能看到交互标记。
+
+**4. auto-refresh interval 使用粘性标志**
+
+检查 `userScrolledAwayRef.current` 而非调用 `isNearBottom()`。用户滚离时完全跳过 refresh（零 re-render = 零干扰），标记 `pendingRefreshRef` 待用户滚回底部后补刷。
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/pages/chat/MessageList.tsx` | callback ref + scroll 事件监听 + `userScrolledAwayRef`/`userInteractingRef` + auto-refresh 使用粘性标志 |
+| `docs/REQUIREMENTS.md` | 索引表新增 §五十七 |
+| `docs/requirements/s44-s56.md` | §五十七 需求正文 |
+
+### 验证
+
+- `npm run build` ✅ 通过
+- dev 环境实测 ✅：DevTools console 日志确认 scroll listener 正确绑定，向上滚动后 auto-refresh 跳过刷新
+
+---
+
+## §五十九 Session 列表时间显示改用文件 mtime ✅
+
+**日期**: 2026-03-17
+
+### 问题
+
+`follow_up` 恢复的 subagent 完成后，父 session 的 `lastActiveAt` 不更新。
+
+**根因**: `list_sessions()` 优先读 JSONL 第一行 metadata 的 `updated_at`，但 `append_message()` 只追加消息不重写 metadata 行，导致 `updated_at` 停留在 session 创建/上次 `save()` 的时间。
+
+### 修复
+
+`webserver.py` 第 392-396 行：去掉 `metadata.get('updated_at')` 的优先判断，始终使用 `os.path.getmtime(filepath)` 作为 `last_active`。文件 mtime 在每次 `append_message()` 写入时自动更新，天然反映最新活动时间。
+
+| 文件 | 变更 |
+|------|------|
+| `webserver.py` L392-396 | 移除 `metadata.get('updated_at')` fallback，始终用 `os.path.getmtime()` |

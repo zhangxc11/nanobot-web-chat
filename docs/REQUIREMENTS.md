@@ -85,6 +85,9 @@
 | §五十二 | Turn 结束后「滚动到底部」提示按钮 | v5.8 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 | §五十三 | 前端 cron 提醒消息展示卡片 | — | 🔧 | [requirements/s44-s56.md](requirements/s44-s56.md) |
 | §五十四 | Session 父子关系前端改为消费 API | — | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §五十五 | 并发 task 时用户消息丢失修复 | v5.9 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §五十六 | session 从 running 变为 idle 时前端最终刷新 | v5.9 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §五十七 | 自动刷新时保持滚动位置 | v5.9 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 
 ---
 

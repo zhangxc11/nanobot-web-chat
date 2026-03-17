@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useUIStore } from '@/store/uiStore';
 import { useSessionStore } from '@/store/sessionStore';
+import { useRunningSessions } from '@/hooks/useRunningSessions';
 import * as api from '@/services/api';
 import SessionList from './SessionList';
 import UsageIndicator from './UsageIndicator';
@@ -10,9 +11,11 @@ export default function Sidebar() {
   const { toggleSidebar } = useUIStore();
   const { fetchSessions, createSession, setActiveSession, hideDone, setHideDone } = useSessionStore();
   const [searchQuery, setSearchQuery] = useState('');
+  const [showRunningOnly, setShowRunningOnly] = useState(false);
   const [searchResults, setSearchResults] = useState<api.SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runningKeys = useRunningSessions();
 
   useEffect(() => {
     fetchSessions();
@@ -88,6 +91,13 @@ export default function Sidebar() {
           >
             {hideDone ? '🙈 隐藏已完成' : '👁 显示全部'}
           </button>
+          <button
+            className={`${styles.filterToggle} ${showRunningOnly ? styles.filterToggleActive : ''}`}
+            onClick={() => setShowRunningOnly(!showRunningOnly)}
+            title={showRunningOnly ? '显示全部' : '仅显示运行中'}
+          >
+            {showRunningOnly ? '🏃 运行中' : '🏃 全部'}
+          </button>
         </div>
       </div>
       <div className={styles.sessionList}>
@@ -120,7 +130,7 @@ export default function Sidebar() {
             )}
           </div>
         ) : (
-          <SessionList />
+          <SessionList showRunningOnly={showRunningOnly} runningKeys={runningKeys} />
         )}
       </div>
       <UsageIndicator />
