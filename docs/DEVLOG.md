@@ -694,3 +694,38 @@ subagent task 不在 worker `_tasks` 中（由 parent task 内部 `SubagentManag
 | `docs/REQUIREMENTS.md` | 索引表新增 §五十八 |
 | `docs/requirements/s44-s56.md` | §五十八 需求正文 |
 | `docs/DEVLOG.md` | Phase 61 记录 |
+
+---
+
+## Phase 62: 修复 session 切换时误显示"新消息"浮标 (§五十九) ✅
+
+**日期**: 2026-03-17
+
+### 问题
+
+从一个正在 running 的 session 切换到另一个 session 时，底部中间会错误出现"新消息 ↓"浮标。
+
+### 根因
+
+`prevSendingRef` 是组件级 `useRef`，跨 session 共享，session 切换时未重置。
+
+**触发链路**：
+1. Session A running → `prevSendingRef.current = true`
+2. 切换到 idle 的 Session B → `isCurrentSessionSending = false`
+3. turn-end effect 检测到 `wasSending=true && !isCurrentSessionSending` → 误判为 turn 结束
+4. `requestAnimationFrame` 延迟执行 `setShowScrollToBottom(true)`，绕过了 session 切换 effect 中的同步 `setShowScrollToBottom(false)` 清理
+
+**加剧因素**：turn-end effect 使用 `requestAnimationFrame`，回调在下一帧执行，时序上晚于 session 切换 effect 的同步清理。
+
+### 修复
+
+在 session 切换 effect（`activeSessionId` 变化）中重置两个 ref：
+- `prevSendingRef.current = false` — 防止误触发 "turn end" 浮标
+- `wasRunningRef.current = false` — 防止误触发 "task completed" 刷新
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/pages/chat/MessageList.tsx` | session 切换 effect 中重置 `prevSendingRef` 和 `wasRunningRef` |
+| `docs/DEVLOG.md` | Phase 62 记录 |
