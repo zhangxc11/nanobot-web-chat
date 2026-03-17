@@ -88,6 +88,7 @@
 | §五十五 | 并发 task 时用户消息丢失修复 | v5.9 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 | §五十六 | session 从 running 变为 idle 时前端最终刷新 | v5.9 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 | §五十七 | 自动刷新时保持滚动位置 | v5.9 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
+| §五十八 | 轮询效率修复 — subagent N+1 + 双重 useRunningSessions | v5.9.1 | ✅ | [requirements/s44-s56.md](requirements/s44-s56.md) |
 
 ---
 

@@ -26,22 +26,19 @@ function mapsEqual(
 }
 
 /**
- * Given a set of running session keys and a set of parent session keys to watch,
+ * Given a list of parent session keys (pre-filtered to only those with running children),
  * returns a map of parentSessionKey → SubagentInfo[].
- * Only polls parents that have at least one running child.
+ * §58: Caller is responsible for filtering to only parents with running children.
  */
 export function useSubagentStatus(
   parentSessionKeys: string[],
-  runningKeys: Set<string>,
 ): Map<string, SubagentInfo[]> {
   const [statusMap, setStatusMap] = useState<Map<string, SubagentInfo[]>>(new Map());
   const activeParentsRef = useRef<string[]>([]);
   const prevMapRef = useRef<Map<string, SubagentInfo[]>>(new Map());
 
-  // Determine which parents to poll: those that have at least one running child
-  const activeParents = parentSessionKeys.filter(() => {
-    return runningKeys.size > 0;
-  });
+  // Determine which parents to poll: caller already filters to only parents with running children
+  const activeParents = parentSessionKeys;
 
   const poll = useCallback(async () => {
     if (activeParents.length === 0) {

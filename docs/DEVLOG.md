@@ -666,3 +666,31 @@ subagent task 不在 worker `_tasks` 中（由 parent task 内部 `SubagentManag
 | 文件 | 变更 |
 |------|------|
 | `webserver.py` L392-396 | 移除 `metadata.get('updated_at')` fallback，始终用 `os.path.getmtime()` |
+
+---
+
+## Phase 61: 轮询效率修复 — subagent N+1 + 双重 useRunningSessions (§五十八) 🔧
+
+**日期**: 2026-03-17
+
+### 问题
+
+1. **subagent 轮询 N+1 请求**: `useSubagentStatus` 的 `activeParents` 过滤逻辑 bug — 只要有任意 running session 就对所有有子 session 的 parent 发请求
+2. **useRunningSessions 双重轮询**: `Sidebar` 传入 `runningKeys`，但 `SessionList` 内部又无条件调用 `useRunningSessions()`，两个独立 interval 同时轮询
+
+### 修复
+
+1. `SessionList.tsx`: 计算 `activeParentKeys` 只保留有 running child 的 parent
+2. `useSubagentStatus.ts`: 简化 `activeParents` 过滤，直接使用传入的 keys
+3. `useRunningSessions.ts`: 新增 `enabled` 参数，`SessionList` 在有外部传入时传 `enabled=false`
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/hooks/useSubagentStatus.ts` | 简化 `activeParents` 过滤 |
+| `frontend/src/hooks/useRunningSessions.ts` | 新增 `enabled` 参数 |
+| `frontend/src/pages/chat/Sidebar/SessionList.tsx` | `activeParentKeys` 过滤 + `enabled=false` |
+| `docs/REQUIREMENTS.md` | 索引表新增 §五十八 |
+| `docs/requirements/s44-s56.md` | §五十八 需求正文 |
+| `docs/DEVLOG.md` | Phase 61 记录 |

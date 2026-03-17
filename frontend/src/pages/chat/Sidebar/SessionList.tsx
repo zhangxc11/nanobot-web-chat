@@ -572,7 +572,7 @@ export default function SessionList({ showRunningOnly = false, runningKeys: exte
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
 
   // §48: Poll running sessions — use external if provided, otherwise poll internally
-  const internalRunningKeys = useRunningSessions();
+  const internalRunningKeys = useRunningSessions(!externalRunningKeys);
   const runningKeys = externalRunningKeys ?? internalRunningKeys;
 
   // Build tree
@@ -581,19 +581,24 @@ export default function SessionList({ showRunningOnly = false, runningKeys: exte
     [sessions, parentMap],
   );
 
-  // §49: Collect parent session keys that have children, for subagent polling
+  // §49/§58: Collect parent session keys that have running children, for subagent polling
   const parentSessionKeys = useMemo(() => {
     const keys: string[] = [];
     for (const node of roots) {
       if (node.children.length > 0 && node.session.sessionKey) {
-        keys.push(node.session.sessionKey);
+        const hasRunningChild = node.children.some(
+          child => runningKeys.has(child.session.sessionKey || '')
+        );
+        if (hasRunningChild) {
+          keys.push(node.session.sessionKey);
+        }
       }
     }
     return keys;
-  }, [roots]);
+  }, [roots, runningKeys]);
 
-  // §49: Poll subagent status
-  const subagentMap = useSubagentStatus(parentSessionKeys, runningKeys);
+  // §49/§58: Poll subagent status — parentSessionKeys already filtered to active parents
+  const subagentMap = useSubagentStatus(parentSessionKeys);
 
   // Filter out "done" root sessions when hideDone is on
   const filteredRoots = useMemo(() => {
