@@ -669,7 +669,7 @@ subagent task 不在 worker `_tasks` 中（由 parent task 内部 `SubagentManag
 
 ---
 
-## Phase 61: 轮询效率修复 — subagent N+1 + 双重 useRunningSessions (§五十八) 🔧
+## Phase 61: 轮询效率修复 — subagent N+1 + 双重 useRunningSessions (§五十八) ✅
 
 **日期**: 2026-03-17
 
