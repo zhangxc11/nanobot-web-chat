@@ -330,6 +330,7 @@ def _get_subagent_manager():
         from nanobot.session.manager import SessionManager
         from nanobot.bus.queue import MessageBus
         from nanobot.usage.recorder import UsageRecorder
+        from nanobot.usage.detail_logger import LLMDetailLogger
 
         pool = _get_pool()
         config = load_config()
@@ -341,13 +342,19 @@ def _get_subagent_manager():
             model=pool.active_model,
             temperature=config.agents.defaults.temperature,
             max_tokens=config.agents.defaults.max_tokens,
+            reasoning_effort=config.agents.defaults.reasoning_effort,
+            brave_api_key=config.tools.web.search.api_key or None,
+            web_proxy=config.tools.web.proxy or None,
             exec_config=config.tools.exec,
             restrict_to_workspace=config.tools.restrict_to_workspace,
+            read_file_hard_limit=config.tools.read_file_hard_limit,
+            max_concurrency=config.spawn.max_concurrency,
             usage_recorder=UsageRecorder(),  # §40 fix: subagent usage needs its own recorder
             session_manager=SessionManager(config.workspace_path),
             task_keeper=_keep_subagent_task,
             session_messenger=WorkerSessionMessenger(),
             event_callback=_subagent_callback,  # §47: lifecycle tracking
+            detail_logger=LLMDetailLogger(),  # §48: LLM call recording for subagents
         )
         logger.info("SubagentManager singleton created")
         return _subagent_manager
@@ -405,10 +412,13 @@ def _create_runner():
         max_tokens=config.agents.defaults.max_tokens,
         max_iterations=config.agents.defaults.max_tool_iterations,
         memory_window=config.agents.defaults.memory_window,
+        reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        read_file_hard_limit=config.tools.read_file_hard_limit,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
@@ -418,6 +428,7 @@ def _create_runner():
         subagent_task_keeper=_keep_subagent_task,
         session_messenger=messenger,
         subagent_manager=_get_subagent_manager(),  # §40: shared singleton
+        spawn_max_concurrency=config.spawn.max_concurrency,  # §46: align with config
     )
 
     runner = AgentRunner(agent_loop)

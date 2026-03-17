@@ -136,9 +136,10 @@ function ProgressIndicator({ steps, recovering }: { steps: ProgressStep[]; recov
 }
 
 export default function MessageList() {
-  const { messages, loading, hasMore, error, getTask } = useMessageStore();
+  const { messages, loading, hasMore, getTask, getError } = useMessageStore();
   const { activeSessionId } = useSessionStore();
   const task = activeSessionId ? getTask(activeSessionId) : null;
+  const error = activeSessionId ? getError(activeSessionId) : null;
   const isCurrentSessionSending = task?.sending ?? false;
   const progressSteps = task?.progressSteps ?? [];
   const recovering = task?.recovering ?? false;

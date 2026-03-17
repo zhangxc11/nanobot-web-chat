@@ -46,7 +46,7 @@ interface MessageStore {
   messages: Message[];
   hasMore: boolean;
   loading: boolean;
-  error: string | null;
+  errorBySession: Record<string, string | null>;
   taskBySession: Record<string, SessionTask>;  // per-session task state
   draftBySession: Record<string, string>;       // per-session input draft text
   loadMessages: (sessionId: string) => Promise<void>;
@@ -59,6 +59,7 @@ interface MessageStore {
   setDraft: (sessionId: string, text: string) => void;
   getDraft: (sessionId: string) => string;
   getTask: (sessionId: string) => SessionTask;
+  getError: (sessionId: string) => string | null;
 }
 
 const PAGE_SIZE = 30;
@@ -80,11 +81,25 @@ function _updateTask(
   };
 }
 
+/** Helper to set per-session error immutably */
+function _setError(
+  state: { errorBySession: Record<string, string | null> },
+  sessionId: string,
+  error: string | null,
+): Pick<MessageStore, 'errorBySession'> {
+  return {
+    errorBySession: {
+      ...state.errorBySession,
+      [sessionId]: error,
+    },
+  };
+}
+
 export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: [],
   hasMore: false,
   loading: false,
-  error: null,
+  errorBySession: {},
   taskBySession: {},
   draftBySession: {},
 
@@ -92,8 +107,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     return get().taskBySession[sessionId] || EMPTY_TASK;
   },
 
+  getError: (sessionId) => {
+    return get().errorBySession[sessionId] ?? null;
+  },
+
   loadMessages: async (sessionId) => {
-    set({ loading: true, error: null, messages: [], hasMore: false });
+    set((s) => ({ loading: true, messages: [], hasMore: false, ..._setError(s, sessionId, null) }));
     try {
       const data = await api.fetchMessages(sessionId, PAGE_SIZE);
       set({
@@ -102,7 +121,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         loading: false,
       });
     } catch (err) {
-      set({ loading: false, error: String(err) });
+      set((s) => ({ loading: false, ..._setError(s, sessionId, String(err)) }));
     }
   },
 
@@ -119,7 +138,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         loading: false,
       }));
     } catch (err) {
-      set({ loading: false, error: String(err) });
+      set((s) => ({ loading: false, ..._setError(s, sessionId, String(err)) }));
     }
   },
 
@@ -136,7 +155,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           // Local command: show help as system message
           set((s) => ({
             messages: [...s.messages, _makeSystemMsg(HELP_TEXT)],
-            error: null,
+            ..._setError(s, sessionId, null),
           }));
           return;
         }
@@ -165,10 +184,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           try {
             const newSession = await useSessionStore.getState().createSession();
             if (newSession) {
-              set(() => ({
+              set((s) => ({
                 messages: [],
                 hasMore: false,
-                error: null,
+                ..._setError(s, sessionId, null),
               }));
               set((s) => ({
                 messages: [...s.messages, _makeSystemMsg('✅ 已创建新对话。')],
@@ -204,7 +223,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           };
           set((s) => ({
             messages: [...s.messages, cmdMsg],
-            error: null,
+            ..._setError(s, sessionId, null),
             ..._updateTask(s, sessionId, {
               sending: true,
               progressSteps: [],
@@ -240,7 +259,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 progressSteps: [],
                 abortController: null,
               }),
-              error: `⚠️ ${errorMsg}`,
+              ..._setError(s, sessionId, `⚠️ ${errorMsg}`),
             }));
           }
           return;
@@ -414,7 +433,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     window.dispatchEvent(new CustomEvent('user-message-sent'));
     set((s) => ({
       messages: [...s.messages, userMsg],
-      error: null,
+      ..._setError(s, sessionId, null),
       ..._updateTask(s, sessionId, {
         sending: true,
         progressSteps: [],
@@ -484,13 +503,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             recovering: false,
             abortController: null,
           }),
-          error: '⚠️ 消息发送失败（服务暂不可用），请稍后重试',
+          ..._setError(s, sessionId, '⚠️ 消息发送失败（服务暂不可用），请稍后重试'),
         }));
       } else if (isConnectionError) {
         // SSE mid-stream disconnect — message was delivered, task may still be running.
         // Enter poll recovery to wait for task completion.
         set((s) => _updateTask(s, sessionId, { recovering: true, abortController: null }));
-        set({ error: null });
+        set((s) => ({ ..._setError(s, sessionId, null) }));
         const recovered = await _pollTaskStatus(sessionId, set);
         if (recovered) {
           await _reloadMessages(sessionId, set);
@@ -502,7 +521,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               progressSteps: [],
               abortController: null,
             }),
-            error: `⚠️ ${errorMsg}（任务可能仍在后台执行，请稍后刷新页面查看结果）`,
+            ..._setError(s, sessionId, `⚠️ ${errorMsg}（任务可能仍在后台执行，请稍后刷新页面查看结果）`),
           }));
         }
       } else {
@@ -513,7 +532,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             progressSteps: [],
             abortController: null,
           }),
-          error: `⚠️ ${errorMsg}`,
+          ..._setError(s, sessionId, `⚠️ ${errorMsg}`),
         }));
       }
     }
@@ -565,7 +584,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       recovering: false,
       abortController: null,
     }));
-    set({ error: null });
+    set((s) => ({ ..._setError(s, sessionId, null) }));
 
     // Reload messages to show whatever was saved before kill
     const activeSessionId = useSessionStore.getState().activeSessionId;
@@ -613,7 +632,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           progressSteps: restoredSteps,
           recovering: false,
         }),
-        error: null,
+        ..._setError(s, sessionId, null),
       }));
 
       // Attach to the running task via polling
@@ -667,7 +686,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   },
 
   clearMessages: () => {
-    set({ messages: [], hasMore: false, error: null });
+    set({ messages: [], hasMore: false });
     // NOTE: do NOT clear taskBySession here — tasks may still be running
   },
 
@@ -708,7 +727,7 @@ async function _pollTaskStatus(
             recovering: false,
             abortController: null,
           }),
-          error: `⚠️ 后台任务失败: ${status.error || '未知错误'}`,
+          ..._setError(s, sessionId, `⚠️ 后台任务失败: ${status.error || '未知错误'}`),
         }));
         return false;
       }
@@ -721,7 +740,7 @@ async function _pollTaskStatus(
               recovering: false,
               abortController: null,
             }),
-            error: '⚠️ 无法恢复任务状态，请刷新页面查看结果',
+            ..._setError(s, sessionId, '⚠️ 无法恢复任务状态，请刷新页面查看结果'),
           }));
           return false;
         }
@@ -749,7 +768,7 @@ async function _pollTaskStatus(
       recovering: false,
       abortController: null,
     }),
-    error: '⚠️ 轮询超时，请刷新页面查看结果',
+    ..._setError(s, sessionId, '⚠️ 轮询超时，请刷新页面查看结果'),
   }));
   return false;
 }
@@ -795,7 +814,7 @@ async function _reloadMessages(
         recovering: false,
         abortController: null,
       }),
-      error: '⚠️ 消息重载失败，请刷新页面',
+      ..._setError(s, sessionId, '⚠️ 消息重载失败，请刷新页面'),
     }));
   }
 }
