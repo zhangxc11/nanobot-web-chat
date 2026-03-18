@@ -729,3 +729,34 @@ subagent task 不在 worker `_tasks` 中（由 parent task 内部 `SubagentManag
 |------|------|
 | `frontend/src/pages/chat/MessageList.tsx` | session 切换 effect 中重置 `prevSendingRef` 和 `wasRunningRef` |
 | `docs/DEVLOG.md` | Phase 62 记录 |
+
+---
+
+## Phase 63: 修复 restart.sh 进程隔离 — 防止 dev/prod 互杀 ✅
+
+**日期**: 2026-03-18
+
+### 问题
+
+dev 环境执行 `restart.sh stop` 时，会误杀 prod 环境的 webserver/worker 进程（反之亦然）。
+
+### 根因
+
+`find_pids()` 函数在精确路径匹配失败后，fallback 到宽泛模式 `pgrep -f "[Pp]ython[3]?.*${script_name}"`，该模式匹配所有环境中同名的 Python 进程（如 `webserver.py`、`worker.py`），不区分 dev/prod。
+
+### 修复
+
+去掉 `find_pids()` 中的宽泛 fallback，只保留精确 `SCRIPT_DIR` 路径匹配：
+
+```bash
+pids=$(pgrep -f "${SCRIPT_DIR}/${script_name}" 2>/dev/null || true)
+```
+
+端口级兜底（`find_pid_on_port`）在 `stop_service` 中单独使用，不受影响。
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `restart.sh` | `find_pids()` 去掉宽泛 pgrep fallback，只保留精确 SCRIPT_DIR 路径匹配 |
+| `docs/DEVLOG.md` | Phase 63 记录 |
