@@ -763,7 +763,7 @@ pids=$(pgrep -f "${SCRIPT_DIR}/${script_name}" 2>/dev/null || true)
 
 ---
 
-## Phase 61: Integration Tests — Worker / Cron / Webserver (batch-20260320 plan-test) ✅
+## Phase 64: Integration Tests — Worker / Cron / Webserver (batch-20260320 plan-test) ✅
 
 **日期**: 2026-03-20 ~ 2026-03-21
 
