@@ -548,6 +548,9 @@ class TestCacheFields:
 
     def test_daily_usage_includes_cache_fields(self, db):
         """get_daily_usage() should include cache aggregation per day."""
+        from datetime import datetime, timedelta
+        three_days_ago = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%dT10:00:00")
+        three_days_ago_end = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%dT10:00:30")
         conn = db._connect()
         conn.execute(
             """INSERT INTO token_usage
@@ -556,7 +559,7 @@ class TestCacheFields:
                 cache_creation_input_tokens, cache_read_input_tokens)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             ("s1", "m1", 100, 50, 150, 1,
-             "2026-03-09T10:00:00", "2026-03-09T10:00:30", 40, 60),
+             three_days_ago, three_days_ago_end, 40, 60),
         )
         conn.commit()
 
