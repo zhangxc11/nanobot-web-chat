@@ -760,3 +760,39 @@ pids=$(pgrep -f "${SCRIPT_DIR}/${script_name}" 2>/dev/null || true)
 |------|------|
 | `restart.sh` | `find_pids()` 去掉宽泛 pgrep fallback，只保留精确 SCRIPT_DIR 路径匹配 |
 | `docs/DEVLOG.md` | Phase 63 记录 |
+
+---
+
+## Phase 61: Integration Tests — Worker / Cron / Webserver (batch-20260320 plan-test) ✅
+
+**日期**: 2026-03-20 ~ 2026-03-21
+
+### 概要
+
+为 web-chat 后端添加全面的集成测试，覆盖 worker layer、cron 功能、webserver 路由。总计 155 个测试用例全部通过。
+
+### 测试覆盖
+
+| 模块 | 文件 | 测试数 | 覆盖内容 |
+|------|------|--------|----------|
+| Worker | `test_worker_integration.py` | ~60 | session lifecycle, message handling, subagent management |
+| Cron | `test_cron_integration.py` | ~50 | scheduler, job execution, error handling |
+| Webserver | `test_webserver_integration.py` | ~20 | API routes, auth, error responses |
+| Analytics | `test_analytics.py` | ~25 | usage stats, cache fields, daily aggregation |
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `tests/conftest.py` | 新增：共享 fixtures |
+| `tests/test_worker_integration.py` | 新增：worker 集成测试 |
+| `tests/test_cron_integration.py` | 新增：cron 集成测试 |
+| `tests/test_webserver_integration.py` | 新增：webserver 集成测试 |
+| `tests/test_analytics.py` | 修复：相对日期替代硬编码日期 |
+| `tests/README.md` | 更新：测试文档 |
+
+### Commits
+
+- `0c5f800` feat(Phase 61): add integration tests for worker layer and cron functionality
+- `ebf1ca2` fix(test): use relative date in test_daily_usage_includes_cache_fields
+- `c51f005` Merge feat/batch-20260320-plan-test: integration tests
