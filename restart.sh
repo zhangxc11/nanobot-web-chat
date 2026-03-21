@@ -35,14 +35,13 @@ NEW_PROCESS_MAX_AGE=15
 # regardless of whether --port was passed on the command line.
 find_pids() {
     local script_name="$1"
-    # pgrep -f matches the full command line; we match the script path or just the name
-    # Use lsof as fallback to find who's listening on the port
+    # pgrep -f matches the full command line; we match the EXACT script path
+    # to avoid killing other environments (e.g., dev webserver.py when prod restarts)
+    # Port-based fallback (find_pid_on_port) is used separately in stop_service.
     local pids
     pids=$(pgrep -f "${SCRIPT_DIR}/${script_name}" 2>/dev/null || true)
-    if [ -z "$pids" ]; then
-        # Fallback: match just the script name (for cases launched from the dir)
-        pids=$(pgrep -f "[Pp]ython[3]?.*${script_name}" 2>/dev/null || true)
-    fi
+    # NOTE: Do NOT fallback to a broad pattern like "python.*${script_name}"
+    # — that would match other environment processes and kill them!
     echo "$pids"
 }
 

@@ -666,3 +666,97 @@ subagent task 不在 worker `_tasks` 中（由 parent task 内部 `SubagentManag
 | 文件 | 变更 |
 |------|------|
 | `webserver.py` L392-396 | 移除 `metadata.get('updated_at')` fallback，始终用 `os.path.getmtime()` |
+
+---
+
+## Phase 61: 轮询效率修复 — subagent N+1 + 双重 useRunningSessions (§五十八) ✅
+
+**日期**: 2026-03-17
+
+### 问题
+
+1. **subagent 轮询 N+1 请求**: `useSubagentStatus` 的 `activeParents` 过滤逻辑 bug — 只要有任意 running session 就对所有有子 session 的 parent 发请求
+2. **useRunningSessions 双重轮询**: `Sidebar` 传入 `runningKeys`，但 `SessionList` 内部又无条件调用 `useRunningSessions()`，两个独立 interval 同时轮询
+
+### 修复
+
+1. `SessionList.tsx`: 计算 `activeParentKeys` 只保留有 running child 的 parent
+2. `useSubagentStatus.ts`: 简化 `activeParents` 过滤，直接使用传入的 keys
+3. `useRunningSessions.ts`: 新增 `enabled` 参数，`SessionList` 在有外部传入时传 `enabled=false`
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/hooks/useSubagentStatus.ts` | 简化 `activeParents` 过滤 |
+| `frontend/src/hooks/useRunningSessions.ts` | 新增 `enabled` 参数 |
+| `frontend/src/pages/chat/Sidebar/SessionList.tsx` | `activeParentKeys` 过滤 + `enabled=false` |
+| `docs/REQUIREMENTS.md` | 索引表新增 §五十八 |
+| `docs/requirements/s44-s56.md` | §五十八 需求正文 |
+| `docs/DEVLOG.md` | Phase 61 记录 |
+
+---
+
+## Phase 62: 修复 session 切换时误显示"新消息"浮标 (§五十九) ✅
+
+**日期**: 2026-03-17
+
+### 问题
+
+从一个正在 running 的 session 切换到另一个 session 时，底部中间会错误出现"新消息 ↓"浮标。
+
+### 根因
+
+`prevSendingRef` 是组件级 `useRef`，跨 session 共享，session 切换时未重置。
+
+**触发链路**：
+1. Session A running → `prevSendingRef.current = true`
+2. 切换到 idle 的 Session B → `isCurrentSessionSending = false`
+3. turn-end effect 检测到 `wasSending=true && !isCurrentSessionSending` → 误判为 turn 结束
+4. `requestAnimationFrame` 延迟执行 `setShowScrollToBottom(true)`，绕过了 session 切换 effect 中的同步 `setShowScrollToBottom(false)` 清理
+
+**加剧因素**：turn-end effect 使用 `requestAnimationFrame`，回调在下一帧执行，时序上晚于 session 切换 effect 的同步清理。
+
+### 修复
+
+在 session 切换 effect（`activeSessionId` 变化）中重置两个 ref：
+- `prevSendingRef.current = false` — 防止误触发 "turn end" 浮标
+- `wasRunningRef.current = false` — 防止误触发 "task completed" 刷新
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/pages/chat/MessageList.tsx` | session 切换 effect 中重置 `prevSendingRef` 和 `wasRunningRef` |
+| `docs/DEVLOG.md` | Phase 62 记录 |
+
+---
+
+## Phase 63: 修复 restart.sh 进程隔离 — 防止 dev/prod 互杀 ✅
+
+**日期**: 2026-03-18
+
+### 问题
+
+dev 环境执行 `restart.sh stop` 时，会误杀 prod 环境的 webserver/worker 进程（反之亦然）。
+
+### 根因
+
+`find_pids()` 函数在精确路径匹配失败后，fallback 到宽泛模式 `pgrep -f "[Pp]ython[3]?.*${script_name}"`，该模式匹配所有环境中同名的 Python 进程（如 `webserver.py`、`worker.py`），不区分 dev/prod。
+
+### 修复
+
+去掉 `find_pids()` 中的宽泛 fallback，只保留精确 `SCRIPT_DIR` 路径匹配：
+
+```bash
+pids=$(pgrep -f "${SCRIPT_DIR}/${script_name}" 2>/dev/null || true)
+```
+
+端口级兜底（`find_pid_on_port`）在 `stop_service` 中单独使用，不受影响。
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `restart.sh` | `find_pids()` 去掉宽泛 pgrep fallback，只保留精确 SCRIPT_DIR 路径匹配 |
+| `docs/DEVLOG.md` | Phase 63 记录 |

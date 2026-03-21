@@ -9,7 +9,7 @@ import { useSessionStore } from '@/store/sessionStore';
 
 const POLL_INTERVAL = 10_000; // 10 seconds
 
-export function useRunningSessions(): Set<string> {
+export function useRunningSessions(enabled: boolean = true): Set<string> {
   const [runningKeys, setRunningKeys] = useState<Set<string>>(new Set());
   const prevKeysRef = useRef<Set<string>>(new Set());
   const fetchSessions = useSessionStore((s) => s.fetchSessions);
@@ -52,11 +52,13 @@ export function useRunningSessions(): Set<string> {
   }, [fetchSessions]);
 
   useEffect(() => {
+    if (!enabled) return;
+
     // Initial poll
     poll();
     const timer = setInterval(poll, POLL_INTERVAL);
     return () => clearInterval(timer);
-  }, [poll]);
+  }, [poll, enabled]);
 
   return runningKeys;
 }

@@ -273,6 +273,8 @@ export default function MessageList() {
       isInitialLoadRef.current = true;
       pendingRefreshRef.current = false; // Reset on session switch
       userScrolledAwayRef.current = false; // Reset on session switch
+      prevSendingRef.current = false; // Reset to prevent false "turn end" detection
+      wasRunningRef.current = false; // Reset to prevent false "task completed" detection
       loadMessages(activeSessionId);
       // Check if there's a running task for this session (e.g. after page refresh)
       checkRunningTask(activeSessionId);
