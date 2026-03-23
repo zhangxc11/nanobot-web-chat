@@ -1199,6 +1199,7 @@ if __name__ == '__main__':
         _worker_cron_service = CronService(
             _cron_data_dir / "cron" / "jobs.json",
             executor=WorkerCronExecutor(),
+            process_role="web",
         )
         asyncio.run_coroutine_threadsafe(_worker_cron_service.start(), _async_loop).result(timeout=10)
         logger.info("CronService started in worker")
