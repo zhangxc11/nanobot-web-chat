@@ -196,7 +196,7 @@ class WorkerCronExecutor:
         _run_task_sdk(
             f"cron:{job.id}",
             reminder_note,
-            channel=job.payload.channel or "web",
+            channel="cron",
         )
         logger.info(f"WorkerCronExecutor: started task for cron job '{job.name}' ({job.id}) [source={job.payload.source_channel}]")
         return None  # async execution, no immediate response
