@@ -184,7 +184,7 @@ class WorkerCronExecutor:
             reminder_note,
             channel=job.payload.channel or "web",
         )
-        logger.info(f"WorkerCronExecutor: started task for cron job '{job.name}' ({job.id})")
+        logger.info(f"WorkerCronExecutor: started task for cron job '{job.name}' ({job.id}) [source={job.payload.source_channel}]")
         return None  # async execution, no immediate response
 
     async def send_to_session(self, target_session_key: str, message: str, source: str | None = None) -> bool:
@@ -201,12 +201,12 @@ class WorkerCronExecutor:
             if task and task['status'] == 'running':
                 # Running → inject
                 task['_inject_queue'].put({"role": "user", "content": prefixed})
-                logger.info(f"WorkerCronExecutor: injected into running task {target_session_key}")
+                logger.info(f"WorkerCronExecutor: injected into running task {target_session_key} [source={source}]")
                 return True
 
             # Idle → trigger new task
             _run_task_sdk(target_session_key, prefixed, channel='cron')
-            logger.info(f"WorkerCronExecutor: triggered new task for {target_session_key}")
+            logger.info(f"WorkerCronExecutor: triggered new task for {target_session_key} [source={source}]")
             return True
         except Exception as e:
             logger.error(f"WorkerCronExecutor.send_to_session failed: {e}")
