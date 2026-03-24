@@ -54,6 +54,20 @@ _sh.setFormatter(_fmt)
 logger.addHandler(_fh)
 logger.addHandler(_sh)
 
+# ── Route loguru (used by nanobot core) to the same worker.log ──
+try:
+    from loguru import logger as loguru_logger
+    loguru_logger.remove()  # remove default stderr sink
+    loguru_logger.add(
+        LOG_FILE,
+        format="[{time:YYYY-MM-DD HH:mm:ss}] {level} {message}",
+        level="DEBUG",
+        rotation=None,
+        encoding="utf-8",
+    )
+except ImportError:
+    pass  # loguru not installed, skip
+
 
 # ── Async event loop in a dedicated thread ──
 _async_loop: asyncio.AbstractEventLoop | None = None
