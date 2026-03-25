@@ -796,3 +796,29 @@ pids=$(pgrep -f "${SCRIPT_DIR}/${script_name}" 2>/dev/null || true)
 - `0c5f800` feat(Phase 61): add integration tests for worker layer and cron functionality
 - `ebf1ca2` fix(test): use relative date in test_daily_usage_includes_cache_fields
 - `c51f005` Merge feat/batch-20260320-plan-test: integration tests
+
+---
+
+## Phase 65: 修复 extraHeaders 空字符串写入 (§74 配合修复) ✅
+
+**日期**: 2026-03-25
+
+### 概要
+
+前端 config 编辑页保存时，空字符串字段（如 `extraHeaders: ""`）会被原样写入 YAML，导致 nanobot core 解析报错。
+
+在 `_handle_put_config()` 中增加 pydantic round-trip 清洗：前端传来的 dict 经 `Config.model_validate()` → `model_dump(exclude_none=True)` 转换后再写入，空字符串等无效值被 pydantic validator 转为 `None` 后自动剔除。
+
+这是一个跨仓库修复：
+- **nanobot core** (`09b5fbc`): `schema.py` 增加 `field_validator`，在 schema 层防御空字符串
+- **web-chat** (`f8aedd7`): `webserver.py` 在入口层做 pydantic round-trip 清洗
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `webserver.py` | `_handle_put_config()` 增加 pydantic round-trip 清洗（`Config.model_validate()` + `model_dump(exclude_none=True)`） |
+
+### Commits
+
+- `f8aedd7` fix: pydantic round-trip cleansing for config PUT to strip empty strings
