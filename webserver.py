@@ -903,6 +903,15 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({'error': 'Invalid config: expected JSON object'}, 400)
                 return
 
+            # Validate and clean via pydantic round-trip (converts "" → None, excludes None fields)
+            try:
+                from nanobot.config.schema import Config as NanobotConfig
+                config_obj = NanobotConfig.model_validate(data)
+                data = config_obj.model_dump(by_alias=True, exclude_none=True)
+            except Exception as e:
+                self._send_json({'error': f'Invalid config: {e}'}, 400)
+                return
+
             # Write with pretty formatting
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
