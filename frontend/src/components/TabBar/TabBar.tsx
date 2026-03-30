@@ -8,6 +8,7 @@ const tabs: { key: TabKey; label: string; icon: string }[] = [
   { key: 'config', label: '配置', icon: '⚙️' },
   { key: 'memory', label: '记忆', icon: '🧠' },
   { key: 'skills', label: 'Skill', icon: '🔧' },
+  { key: 'cron', label: '定时', icon: '⏰' },
 ];
 
 export default function TabBar() {

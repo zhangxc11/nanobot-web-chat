@@ -48,6 +48,7 @@ LOG_DIR = os.environ.get('NANOBOT_LOG_DIR',
                          os.path.join(os.path.expanduser('~'), '.nanobot', 'logs'))
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, 'webserver.log')
+CRON_JOBS_FILE = os.path.expanduser('~/.nanobot/cron/jobs.json')
 
 # Analytics DB (SQLite)
 from analytics import AnalyticsDB
@@ -220,6 +221,10 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_proxy_provider_get()
             return
 
+        if path == '/api/cron':
+            self._handle_get_cron_jobs()
+            return
+
         if path.startswith('/api/uploads/'):
             self._handle_serve_upload(path)
             return
@@ -290,6 +295,20 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             self._handle_proxy_provider_reload()
             return
 
+        if path == '/api/cron':
+            self._handle_create_cron_job()
+            return
+
+        route_params = self._match_route(path, '/api/cron/:id/enable')
+        if route_params:
+            self._handle_toggle_cron_job(route_params['id'])
+            return
+
+        route_params = self._match_route(path, '/api/cron/:id/run')
+        if route_params:
+            self._handle_run_cron_job(route_params['id'])
+            return
+
         self._send_json({'error': 'Not found'}, 404)
 
     # ── PUT routes ──
@@ -336,6 +355,11 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
         route_params = self._match_route(path, '/api/sessions/:id')
         if route_params:
             self._handle_delete_session(route_params['id'])
+            return
+
+        route_params = self._match_route(path, '/api/cron/:id')
+        if route_params:
+            self._handle_delete_cron_job(route_params['id'])
             return
 
         self._send_json({'error': 'Not found'}, 404)
@@ -1759,6 +1783,164 @@ class WebServerHandler(http.server.BaseHTTPRequestHandler):
             'filename': save_filename,
             'size': len(file_data),
         })
+
+    # ── Cron management handlers ──
+
+    def _load_cron_jobs(self):
+        """Load cron jobs from jobs.json."""
+        try:
+            if not os.path.exists(CRON_JOBS_FILE):
+                return {'version': 1, 'jobs': []}
+            with open(CRON_JOBS_FILE, 'r') as f:
+                data = json.load(f)
+            return data
+        except Exception as e:
+            logger.error(f"Failed to load cron jobs: {e}")
+            return {'version': 1, 'jobs': []}
+
+    def _save_cron_jobs(self, data):
+        """Save cron jobs to jobs.json."""
+        os.makedirs(os.path.dirname(CRON_JOBS_FILE), exist_ok=True)
+        with open(CRON_JOBS_FILE, 'w') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+    def _handle_get_cron_jobs(self):
+        """GET /api/cron — list all cron jobs."""
+        data = self._load_cron_jobs()
+        jobs = []
+        for job in data.get('jobs', []):
+            schedule = job.get('schedule', {})
+            state = job.get('state', {})
+            payload = job.get('payload', {})
+            jobs.append({
+                'id': job.get('id', ''),
+                'name': job.get('name', ''),
+                'enabled': job.get('enabled', True),
+                'schedule': {
+                    'kind': schedule.get('kind', ''),
+                    'expr': schedule.get('expr'),
+                    'tz': schedule.get('tz'),
+                    'atMs': schedule.get('atMs'),
+                    'everyMs': schedule.get('everyMs'),
+                },
+                'message': payload.get('message', ''),
+                'targetSession': payload.get('targetSession'),
+                'sourceChannel': payload.get('sourceChannel'),
+                'deleteAfterRun': job.get('deleteAfterRun', False),
+                'state': {
+                    'nextRunAtMs': state.get('nextRunAtMs'),
+                    'lastRunAtMs': state.get('lastRunAtMs'),
+                    'lastStatus': state.get('lastStatus'),
+                    'lastError': state.get('lastError'),
+                },
+                'createdAtMs': job.get('createdAtMs', 0),
+            })
+        self._send_json({'jobs': jobs})
+
+    def _handle_create_cron_job(self):
+        """POST /api/cron — create a new cron job via nanobot CLI."""
+        body = self._read_json_body()
+        if not body:
+            return
+
+        name = body.get('name', '').strip()
+        message = body.get('message', '').strip()
+        schedule_type = body.get('scheduleType', '')  # 'cron', 'every', 'at'
+        cron_expr = body.get('cronExpr', '').strip()
+        tz = body.get('tz', '').strip()
+        every_seconds = body.get('everySeconds')
+        at_time = body.get('atTime', '').strip()
+
+        if not name or not message:
+            self._send_json({'error': 'name and message are required'}, 400)
+            return
+
+        # Build nanobot cron add command
+        cmd = ['nanobot', 'cron', 'add', '--name', name, '--message', message]
+
+        if schedule_type == 'cron':
+            if not cron_expr:
+                self._send_json({'error': 'cronExpr is required for cron schedule'}, 400)
+                return
+            cmd.extend(['--cron', cron_expr])
+            if tz:
+                cmd.extend(['--tz', tz])
+        elif schedule_type == 'every':
+            if not every_seconds:
+                self._send_json({'error': 'everySeconds is required for every schedule'}, 400)
+                return
+            cmd.extend(['--every', str(int(every_seconds))])
+        elif schedule_type == 'at':
+            if not at_time:
+                self._send_json({'error': 'atTime is required for at schedule'}, 400)
+                return
+            cmd.extend(['--at', at_time])
+        else:
+            self._send_json({'error': 'scheduleType must be cron, every, or at'}, 400)
+            return
+
+        try:
+            import subprocess
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or result.stdout.strip() or 'Unknown error'
+                self._send_json({'error': error_msg}, 500)
+                return
+            self._send_json({'status': 'ok', 'output': result.stdout.strip()})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_delete_cron_job(self, job_id):
+        """DELETE /api/cron/:id — remove a cron job via nanobot CLI."""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['nanobot', 'cron', 'remove', job_id],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or result.stdout.strip() or 'Unknown error'
+                self._send_json({'error': error_msg}, 500)
+                return
+            self._send_json({'status': 'ok'})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_toggle_cron_job(self, job_id):
+        """POST /api/cron/:id/enable — enable/disable a cron job via nanobot CLI."""
+        body = self._read_json_body()
+        if body is None:
+            return
+        enabled = body.get('enabled', True)
+        try:
+            import subprocess
+            cmd = ['nanobot', 'cron', 'enable', job_id]
+            if not enabled:
+                cmd.append('--disable')
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or result.stdout.strip() or 'Unknown error'
+                self._send_json({'error': error_msg}, 500)
+                return
+            self._send_json({'status': 'ok', 'enabled': enabled})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
+
+    def _handle_run_cron_job(self, job_id):
+        """POST /api/cron/:id/run — manually run a cron job via nanobot CLI."""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['nanobot', 'cron', 'run', job_id],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or result.stdout.strip() or 'Unknown error'
+                self._send_json({'error': error_msg}, 500)
+                return
+            self._send_json({'status': 'ok', 'output': result.stdout.strip()})
+        except Exception as e:
+            self._send_json({'error': str(e)}, 500)
 
     def _handle_serve_upload(self, path):
         """GET /api/uploads/<date>/<filename> — serve uploaded image."""

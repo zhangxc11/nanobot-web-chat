@@ -531,3 +531,54 @@ export function sendMessageStream(
 
   return controller;
 }
+
+// ── Cron API ──
+
+export async function fetchCronJobs(): Promise<{ jobs: any[] }> {
+  const res = await fetch(`${API_BASE}/cron`);
+  return res.json();
+}
+
+export async function createCronJob(params: {
+  name: string;
+  message: string;
+  scheduleType: 'cron' | 'every' | 'at';
+  cronExpr?: string;
+  tz?: string;
+  everySeconds?: number;
+  atTime?: string;
+}): Promise<any> {
+  const res = await fetch(`${API_BASE}/cron`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to create job');
+  return data;
+}
+
+export async function deleteCronJob(jobId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/cron/${jobId}`, { method: 'DELETE' });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete job');
+  return data;
+}
+
+export async function toggleCronJob(jobId: string, enabled: boolean): Promise<any> {
+  const res = await fetch(`${API_BASE}/cron/${jobId}/enable`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to toggle job');
+  return data;
+}
+
+export async function runCronJob(jobId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/cron/${jobId}/run`, { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to run job');
+  return data;
+}

@@ -52,7 +52,7 @@ export interface SystemMessage {
   timestamp: string;
 }
 
-export type TabKey = 'chat' | 'usage' | 'config' | 'memory' | 'skills';
+export type TabKey = 'chat' | 'usage' | 'config' | 'memory' | 'skills' | 'cron';
 
 /** Per-session task execution state */
 export interface SessionTask {
