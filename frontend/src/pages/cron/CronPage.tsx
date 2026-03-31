@@ -54,16 +54,109 @@ function formatTime(ms?: number): string {
   return `${timeStr} (${relative})`;
 }
 
-function formatSchedule(s: CronJobSchedule): string {
-  if (s.kind === 'cron') return `cron: ${s.expr}${s.tz ? ` (${s.tz})` : ''}`;
+/**
+ * Translate a cron expression to human-readable Chinese.
+ * Supports standard 5-field cron: minute hour day month weekday
+ */
+function cronToHuman(expr: string): string {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length < 5) return expr;
+
+  const [minute, hour, day, month, weekday] = parts;
+
+  const weekdayNames: Record<string, string> = {
+    '0': '日', '7': '日', '1': '一', '2': '二', '3': '三', '4': '四', '5': '五', '6': '六',
+  };
+
+  const pad = (v: string) => v.padStart(2, '0');
+
+  try {
+    // Every N minutes: */N * * * *
+    if (minute.startsWith('*/') && hour === '*' && day === '*' && month === '*' && weekday === '*') {
+      const n = parseInt(minute.slice(2));
+      return `每 ${n} 分钟`;
+    }
+
+    // Every N hours: 0 */N * * *
+    if (hour.startsWith('*/') && day === '*' && month === '*' && weekday === '*') {
+      const n = parseInt(hour.slice(2));
+      const m = minute === '0' ? '' : ` ${pad(minute)} 分`;
+      return `每 ${n} 小时${m}`;
+    }
+
+    // Specific weekdays: m h * * 1-5 or m h * * 1,3,5
+    if (day === '*' && month === '*' && weekday !== '*') {
+      const timeStr = `${pad(hour)}:${pad(minute)}`;
+      if (weekday === '1-5') return `工作日 ${timeStr}`;
+      if (weekday === '0,6' || weekday === '6,0') return `周末 ${timeStr}`;
+      // Parse comma-separated weekdays
+      const days = weekday.split(',').map(d => weekdayNames[d] || d);
+      if (days.every(d => d.length <= 1)) {
+        return `每周${days.map(d => d).join('、')} ${timeStr}`;
+      }
+      return `每周 ${weekday} ${timeStr}`;
+    }
+
+    // Daily: m h * * *
+    if (day === '*' && month === '*' && weekday === '*' && !hour.includes('*') && !minute.includes('*')) {
+      // Handle hour ranges like 9-17
+      if (hour.includes('-') || hour.includes(',') || hour.includes('/')) {
+        return `每天 ${hour}时 ${pad(minute)}分`;
+      }
+      return `每天 ${pad(hour)}:${pad(minute)}`;
+    }
+
+    // Monthly: m h D * *
+    if (month === '*' && weekday === '*' && !day.includes('*')) {
+      const timeStr = `${pad(hour)}:${pad(minute)}`;
+      if (day.includes(',')) {
+        return `每月 ${day} 日 ${timeStr}`;
+      }
+      return `每月 ${day} 日 ${timeStr}`;
+    }
+
+    // Yearly: m h D M *
+    if (weekday === '*' && !month.includes('*') && !day.includes('*')) {
+      return `每年 ${month}月${day}日 ${pad(hour)}:${pad(minute)}`;
+    }
+
+    // Hourly: m * * * *
+    if (hour === '*' && day === '*' && month === '*' && weekday === '*' && !minute.includes('*')) {
+      return `每小时第 ${minute} 分`;
+    }
+
+    // Fallback: return original
+    return expr;
+  } catch {
+    return expr;
+  }
+}
+
+interface ScheduleDisplay {
+  human: string;
+  expr?: string;
+}
+
+function formatSchedule(s: CronJobSchedule): ScheduleDisplay {
+  if (s.kind === 'cron' && s.expr) {
+    const human = cronToHuman(s.expr);
+    const tz = s.tz ? ` (${s.tz})` : '';
+    // If translation is same as original, don't show duplicate
+    const isTranslated = human !== s.expr;
+    return {
+      human: human + tz,
+      expr: isTranslated ? s.expr : undefined,
+    };
+  }
   if (s.kind === 'every') {
     const sec = (s.everyMs || 0) / 1000;
-    if (sec >= 3600) return `每 ${Math.floor(sec / 3600)} 小时`;
-    if (sec >= 60) return `每 ${Math.floor(sec / 60)} 分钟`;
-    return `每 ${sec} 秒`;
+    if (sec >= 86400) return { human: `每 ${Math.floor(sec / 86400)} 天` };
+    if (sec >= 3600) return { human: `每 ${Math.floor(sec / 3600)} 小时` };
+    if (sec >= 60) return { human: `每 ${Math.floor(sec / 60)} 分钟` };
+    return { human: `每 ${sec} 秒` };
   }
-  if (s.kind === 'at') return `一次性: ${formatTime(s.atMs)}`;
-  return s.kind || '未知';
+  if (s.kind === 'at') return { human: `一次性: ${formatTime(s.atMs)}` };
+  return { human: s.kind || '未知' };
 }
 
 export default function CronPage() {
@@ -89,8 +182,9 @@ export default function CronPage() {
       setError('');
       const data = await fetchCronJobs();
       setJobs(data.jobs || []);
-    } catch (e: any) {
-      setError(e.message || '加载失败');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '加载失败';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -106,8 +200,9 @@ export default function CronPage() {
     try {
       await deleteCronJob(id);
       await loadJobs();
-    } catch (e: any) {
-      alert(`删除失败: ${e.message}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '删除失败';
+      alert(`删除失败: ${msg}`);
     } finally {
       setActionLoading(null);
     }
@@ -118,8 +213,9 @@ export default function CronPage() {
     try {
       await toggleCronJob(id, !currentEnabled);
       await loadJobs();
-    } catch (e: any) {
-      alert(`操作失败: ${e.message}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '操作失败';
+      alert(`操作失败: ${msg}`);
     } finally {
       setActionLoading(null);
     }
@@ -131,8 +227,9 @@ export default function CronPage() {
       await runCronJob(id);
       alert('已触发执行');
       await loadJobs();
-    } catch (e: any) {
-      alert(`执行失败: ${e.message}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '执行失败';
+      alert(`执行失败: ${msg}`);
     } finally {
       setActionLoading(null);
     }
@@ -163,8 +260,9 @@ export default function CronPage() {
       setFormEverySeconds('');
       setFormAtTime('');
       await loadJobs();
-    } catch (e: any) {
-      setCreateError(e.message || '创建失败');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '创建失败';
+      setCreateError(msg);
     } finally {
       setActionLoading(null);
     }
@@ -244,64 +342,70 @@ export default function CronPage() {
         <div className={styles.empty}>暂无定时任务</div>
       ) : (
         <div className={styles.jobList}>
-          {jobs.map(job => (
-            <div key={job.id} className={`${styles.jobCard} ${!job.enabled ? styles.jobDisabled : ''}`}>
-              <div className={styles.jobHeader}>
-                <div className={styles.jobTitle}>
-                  <span className={styles.jobName}>{job.name}</span>
-                  <span className={styles.jobId}>{job.id}</span>
-                  {!job.enabled && <span className={styles.disabledBadge}>已禁用</span>}
-                  {job.deleteAfterRun && <span className={styles.onceBadge}>一次性</span>}
+          {jobs.map(job => {
+            const schedule = formatSchedule(job.schedule);
+            return (
+              <div key={job.id} className={`${styles.jobCard} ${!job.enabled ? styles.jobDisabled : ''}`}>
+                <div className={styles.jobHeader}>
+                  <div className={styles.jobTitle}>
+                    <span className={styles.jobName}>{job.name}</span>
+                    <span className={styles.jobId}>{job.id}</span>
+                    {!job.enabled && <span className={styles.disabledBadge}>已禁用</span>}
+                    {job.deleteAfterRun && <span className={styles.onceBadge}>一次性</span>}
+                  </div>
+                  <div className={styles.jobActions}>
+                    <button
+                      className={styles.actionBtn}
+                      onClick={() => handleToggle(job.id, job.enabled)}
+                      disabled={actionLoading === job.id}
+                      title={job.enabled ? '禁用' : '启用'}
+                    >
+                      {job.enabled ? '⏸' : '▶️'}
+                    </button>
+                    <button
+                      className={styles.actionBtn}
+                      onClick={() => handleRun(job.id)}
+                      disabled={actionLoading === job.id || !job.enabled}
+                      title="立即执行"
+                    >
+                      🚀
+                    </button>
+                    <button
+                      className={`${styles.actionBtn} ${styles.deleteBtn}`}
+                      onClick={() => handleDelete(job.id, job.name)}
+                      disabled={actionLoading === job.id}
+                      title="删除"
+                    >
+                      🗑
+                    </button>
+                  </div>
                 </div>
-                <div className={styles.jobActions}>
-                  <button
-                    className={styles.actionBtn}
-                    onClick={() => handleToggle(job.id, job.enabled)}
-                    disabled={actionLoading === job.id}
-                    title={job.enabled ? '禁用' : '启用'}
-                  >
-                    {job.enabled ? '⏸' : '▶️'}
-                  </button>
-                  <button
-                    className={styles.actionBtn}
-                    onClick={() => handleRun(job.id)}
-                    disabled={actionLoading === job.id || !job.enabled}
-                    title="立即执行"
-                  >
-                    🚀
-                  </button>
-                  <button
-                    className={`${styles.actionBtn} ${styles.deleteBtn}`}
-                    onClick={() => handleDelete(job.id, job.name)}
-                    disabled={actionLoading === job.id}
-                    title="删除"
-                  >
-                    🗑
-                  </button>
+                <div className={styles.jobSchedule}>
+                  <span className={styles.scheduleHuman}>{schedule.human}</span>
+                  {schedule.expr && <span className={styles.scheduleExpr}>{schedule.expr}</span>}
                 </div>
-              </div>
-              <div className={styles.jobSchedule}>{formatSchedule(job.schedule)}</div>
-              <div className={styles.jobMessage}>{job.message}</div>
-              <div className={styles.jobMeta}>
-                <span>下次: {formatTime(job.state.nextRunAtMs)}</span>
-                <span>上次: {formatTime(job.state.lastRunAtMs)}</span>
-                {job.state.lastStatus && (
-                  <span className={job.state.lastStatus === 'ok' ? styles.statusOk : styles.statusError}>
-                    {job.state.lastStatus}
-                  </span>
+                <div className={styles.jobMessage}>{job.message}</div>
+                <div className={styles.jobMeta}>
+                  <span>下次: {formatTime(job.state.nextRunAtMs)}</span>
+                  <span>上次: {formatTime(job.state.lastRunAtMs)}</span>
+                  {job.state.lastStatus && (
+                    <span className={job.state.lastStatus === 'ok' ? styles.statusOk : styles.statusError}>
+                      {job.state.lastStatus}
+                    </span>
+                  )}
+                </div>
+                {job.state.lastError && (
+                  <div className={styles.jobError}>❌ {job.state.lastError}</div>
+                )}
+                {(job.targetSession || job.sourceChannel) && (
+                  <div className={styles.jobTarget}>
+                    {job.targetSession && <span>目标: {job.targetSession}</span>}
+                    {job.sourceChannel && <span>来源: {job.sourceChannel}</span>}
+                  </div>
                 )}
               </div>
-              {job.state.lastError && (
-                <div className={styles.jobError}>❌ {job.state.lastError}</div>
-              )}
-              {(job.targetSession || job.sourceChannel) && (
-                <div className={styles.jobTarget}>
-                  {job.targetSession && <span>目标: {job.targetSession}</span>}
-                  {job.sourceChannel && <span>来源: {job.sourceChannel}</span>}
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
